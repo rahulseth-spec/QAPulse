@@ -1,0 +1,8 @@
+{
+  "name": "QA Management System",
+  "description": "A high-performance QA Management System for generating, publishing, and searching weekly reports with integrated AI insights.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
