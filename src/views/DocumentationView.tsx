@@ -1,11 +1,10 @@
-
 import React from 'react';
 
 const DocumentationView: React.FC = () => {
   return (
     <div className="max-w-4xl mx-auto space-y-12 pb-20">
       <header className="border-b pb-8">
-        <h1 className="text-4xl font-black text-slate-900 mb-4">QASync System Design</h1>
+        <h1 className="text-4xl font-black text-slate-900 mb-4">QAPulse System Design</h1>
         <p className="text-lg text-slate-600">Unified QA Management & Reporting Architecture.</p>
       </header>
 
@@ -13,7 +12,7 @@ const DocumentationView: React.FC = () => {
         <h2 className="text-2xl font-bold border-l-4 border-blue-600 pl-4">1. Access Model</h2>
         <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
           <p className="text-slate-600 leading-relaxed">
-            QASync follows a <strong>Unified Feature Model</strong>. All authenticated users gain immediate access to the full suite of QA management tools without role-based friction.
+            QAPulse follows a <strong>Unified Feature Model</strong>. All authenticated users gain immediate access to the full suite of QA management tools without role-based friction.
           </p>
           <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="flex items-center gap-3 p-3 bg-blue-50 border border-blue-100 rounded-lg">

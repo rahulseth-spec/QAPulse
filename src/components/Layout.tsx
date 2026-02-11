@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { User } from '../types';
@@ -20,11 +19,10 @@ export const Layout: React.FC<LayoutProps> = ({ user, logout, children }) => {
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">
-      {/* Sidebar */}
       <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col shrink-0">
         <div className="p-6 border-b border-slate-800 flex items-center gap-3">
           <div className="w-8 h-8 bg-blue-500 rounded flex items-center justify-center text-white font-bold shadow-lg shadow-blue-500/20">Q</div>
-          <span className="text-xl font-bold text-white tracking-tight">QASync</span>
+          <span className="text-xl font-bold text-white tracking-tight">QAPulse</span>
         </div>
         
         <nav className="flex-1 p-4 space-y-2">
@@ -61,7 +59,6 @@ export const Layout: React.FC<LayoutProps> = ({ user, logout, children }) => {
         </div>
       </aside>
 
-      {/* Main Content */}
       <main className="flex-1 flex flex-col overflow-hidden relative">
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 sticky top-0 z-10 shrink-0 shadow-sm">
           <div className="flex items-center gap-4">

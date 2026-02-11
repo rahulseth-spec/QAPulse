@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { WeeklyReport, Project, ReportStatus } from '../types';
 import { Link } from 'react-router-dom';
@@ -58,77 +57,54 @@ const SearchView: React.FC<SearchProps> = ({ reports, projects }) => {
           <div>
             <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Status</label>
             <select className="w-full border rounded-lg px-3 py-2" value={filters.status} onChange={e => setFilters({...filters, status: e.target.value})}>
-              <option value="">All Statuses</option>
-              <option value={ReportStatus.DRAFT}>Draft</option>
-              <option value={ReportStatus.PUBLISHED}>Published</option>
-              <option value={ReportStatus.APPROVED}>Approved</option>
+              <option value="">Any</option>
+              {Object.values(ReportStatus).map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
           <div>
             <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Month</label>
             <select className="w-full border rounded-lg px-3 py-2" value={filters.month} onChange={e => setFilters({...filters, month: e.target.value})}>
-              <option value="">All Months</option>
+              <option value="">Any</option>
               {months.map(m => <option key={m.val} value={m.val}>{m.label}</option>)}
             </select>
           </div>
           <div>
-            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Week of Month</label>
+            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Year</label>
+            <select className="w-full border rounded-lg px-3 py-2" value={filters.year} onChange={e => setFilters({...filters, year: e.target.value})}>
+              {years.map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Week</label>
             <select className="w-full border rounded-lg px-3 py-2" value={filters.weekOfMonth} onChange={e => setFilters({...filters, weekOfMonth: e.target.value})}>
-              <option value="">Any Week</option>
-              {weeks.map(w => <option key={w} value={w}>Week {w}</option>)}
+              <option value="">Any</option>
+              {weeks.map(w => <option key={w} value={w}>{w}</option>)}
             </select>
           </div>
         </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
-        <table className="w-full text-sm">
-          <thead className="bg-slate-50 border-b">
-            <tr className="text-left text-slate-500 font-bold">
-              <th className="px-6 py-4">Title & Project</th>
-              <th className="px-6 py-4">Status</th>
-              <th className="px-6 py-4">Cycle</th>
-              <th className="px-6 py-4">Last Updated</th>
-              <th className="px-6 py-4 text-right">Action</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {filteredReports.map(report => (
-              <tr key={report.id} className="hover:bg-slate-50 transition-colors">
-                <td className="px-6 py-4">
-                  <div className="font-bold text-slate-900">{report.title}</div>
-                  <div className="text-[10px] text-slate-400 font-bold uppercase">{projects.find(p => p.id === report.projectId)?.name}</div>
-                </td>
-                <td className="px-6 py-4">
-                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                    report.status === ReportStatus.PUBLISHED ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'
-                  }`}>
-                    {report.status}
-                  </span>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                   <div className="text-xs">{getMonthName(report.month)} • Week {report.weekOfMonth}</div>
-                   <div className="text-[10px] text-slate-400">Year {report.year}</div>
-                </td>
-                <td className="px-6 py-4 text-xs text-slate-500">
-                  {formatISODate(report.updatedAt)}
-                </td>
-                <td className="px-6 py-4 text-right">
-                  <Link to={`/report/${report.id}`} className="px-4 py-1.5 bg-white border border-slate-200 rounded text-xs font-bold hover:bg-slate-100">
-                    Open
-                  </Link>
-                </td>
-              </tr>
-            ))}
-            {filteredReports.length === 0 && (
-              <tr>
-                <td colSpan={5} className="py-20 text-center text-slate-400">
-                   No reports match your current filters.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm">
+        <div className="p-6 border-b border-slate-200 flex items-center justify-between">
+          <h3 className="text-xl font-bold text-slate-800">Results</h3>
+          <span className="text-sm text-slate-500">{filteredReports.length} found</span>
+        </div>
+        <div className="divide-y">
+          {filteredReports.map(r => (
+            <div key={r.id} className="p-4 hover:bg-slate-50">
+              <div className="flex items-center justify-between">
+                <Link to={`/report/${r.id}`} className="font-semibold text-slate-900 hover:text-blue-700">
+                  {r.title}
+                </Link>
+                <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-slate-100 text-slate-600">{r.status}</span>
+              </div>
+              <div className="text-xs text-slate-500 mt-1 flex gap-4">
+                <span>📅 {getMonthName(r.month)} - Week {r.weekOfMonth}</span>
+                <span>Updated {formatISODate(r.updatedAt)}</span>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

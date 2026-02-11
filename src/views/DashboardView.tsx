@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { WeeklyReport, Project, User, ReportStatus } from '../types';
 import { Link } from 'react-router-dom';
@@ -23,7 +22,6 @@ const DashboardView: React.FC<DashboardProps> = ({ reports, projects, user, user
 
   return (
     <div className="space-y-8">
-      {/* Welcome Header */}
       <div className="bg-gradient-to-r from-blue-700 to-blue-900 rounded-2xl p-8 text-white shadow-xl">
         <h1 className="text-3xl font-bold mb-2">Welcome back, {user.name.split(' ')[0]}!</h1>
         <p className="text-blue-100/80 mb-6">Manage your QA weekly reports and track team health effortlessly.</p>
@@ -44,7 +42,6 @@ const DashboardView: React.FC<DashboardProps> = ({ reports, projects, user, user
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Recent Reports List */}
         <div className="lg:col-span-2 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-xl font-bold text-slate-800">Recent Reports</h3>
@@ -85,7 +82,6 @@ const DashboardView: React.FC<DashboardProps> = ({ reports, projects, user, user
           </div>
         </div>
 
-        {/* Quick Actions & Projects */}
         <div className="space-y-6">
           <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
             <h3 className="font-bold text-slate-800 mb-4 uppercase tracking-wider text-xs">Quick Actions</h3>
