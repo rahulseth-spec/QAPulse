@@ -24,28 +24,46 @@ const App: React.FC = () => {
   const [name, setName] = useState('');
   const [error, setError] = useState('');
 
-  const handleLogin = (e: React.FormEvent) => {
+  useEffect(() => {
+    const saved = localStorage.getItem('qapulse_auth');
+    if (saved) {
+      try {
+        const { user } = JSON.parse(saved);
+        setCurrentUser(user);
+      } catch {}
+    }
+  }, []);
+
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-
-    const trimmedEmail = email.trim();
-    const user = users.find(u => u.email.toLowerCase() === trimmedEmail.toLowerCase());
-    
-    if (!user) {
-      setError('No account found with this email. Please check your spelling or sign up.');
-      return;
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || 'Login failed');
+        return;
+      }
+      const user: User = {
+        id: data.user.id,
+        name: data.user.name,
+        email: data.user.email,
+        projects: Array.isArray(data.user.projects) && data.user.projects.length > 0
+          ? data.user.projects
+          : MOCK_PROJECTS.map(p => p.id),
+      };
+      setCurrentUser(user);
+      localStorage.setItem('qapulse_auth', JSON.stringify({ token: data.token, user }));
+    } catch (err) {
+      setError('Network error. Ensure the API server is running.');
     }
-
-    if (password !== 'password') {
-      setError('The password you entered is incorrect. (Default: "password")');
-      return;
-    }
-
-    setCurrentUser(user);
-    setError('');
   };
 
-  const handleSignup = (e: React.FormEvent) => {
+  const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
@@ -68,22 +86,36 @@ const App: React.FC = () => {
       return;
     }
 
-    // Duplicate User Check
-    if (users.some(u => u.email.toLowerCase() === email.trim().toLowerCase())) {
-      setError('This email is already registered. Try signing in instead.');
-      return;
+    try {
+      const payload = {
+        name: name.trim(),
+        email: email.trim(),
+        password,
+        projects: projects.map(p => p.id),
+      };
+      const res = await fetch('/api/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || 'Signup failed');
+        return;
+      }
+      const user: User = {
+        id: data.user.id,
+        name: data.user.name,
+        email: data.user.email,
+        projects: Array.isArray(data.user.projects) && data.user.projects.length > 0
+          ? data.user.projects
+          : projects.map(p => p.id),
+      };
+      setCurrentUser(user);
+      localStorage.setItem('qapulse_auth', JSON.stringify({ token: data.token, user }));
+    } catch (err) {
+      setError('Network error. Ensure the API server is running.');
     }
-
-    const newUser: User = {
-      id: `u-${Date.now()}`,
-      name: name.trim(),
-      email: email.trim(),
-      projects: projects.map(p => p.id), // New users get access to all existing projects
-    };
-
-    setUsers(prev => [...prev, newUser]);
-    setCurrentUser(newUser);
-    setError('');
   };
 
   const handleAddReport = (newReport: WeeklyReport) => {
@@ -196,7 +228,7 @@ const App: React.FC = () => {
 
   return (
     <Router>
-      <Layout user={currentUser} logout={() => { setCurrentUser(null); setIsSignup(false); setEmail(''); setName(''); setPassword(''); setError(''); }}>
+      <Layout user={currentUser} logout={() => { setCurrentUser(null); localStorage.removeItem('qapulse_auth'); setIsSignup(false); setEmail(''); setName(''); setPassword(''); setError(''); }}>
         <Routes>
           <Route path="/" element={<DashboardView reports={reports} projects={projects} user={currentUser} users={users} />} />
           <Route path="/weekly-reports" element={<WeeklyReportView reports={reports} projects={projects} />} />
