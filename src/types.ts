@@ -1,4 +1,3 @@
-
 export enum ReportStatus {
   DRAFT = 'DRAFT',
   PUBLISHED = 'PUBLISHED',
@@ -41,13 +40,13 @@ export interface User {
   id: string;
   name: string;
   email: string;
-  projects: string[]; // Project IDs
+  projects: string[];
 }
 
 export interface Project {
   id: string;
   name: string;
-  code: string; // e.g., CMS, CLMS
+  code: string;
 }
 
 export interface GoalRow {
@@ -64,6 +63,7 @@ export interface DecisionItem {
 }
 
 export interface ThreadRow {
+  product?: string;
   thread: string;
   ownerId: string;
   status: ThreadStatus;
@@ -80,12 +80,8 @@ export interface WeeklyReport {
   month: number;
   weekOfMonth: 1 | 2 | 3 | 4 | 5;
   status: ReportStatus;
-  revisionOf?: string; // ID of the parent report
-  
-  // Section 1: Weekly Goals & Team Health
+  revisionOf?: string;
   goals: GoalRow[];
-
-  // Section 2: Team Health & Key Decisions
   capacity: {
     plannedHours: number;
     committedHours: number;
@@ -94,6 +90,7 @@ export interface WeeklyReport {
   };
   strength: {
     activeContributors: number;
+    activeContributorNames?: string;
     criticalRoleGaps: boolean;
     gapNotes?: string;
   };
@@ -111,11 +108,7 @@ export interface WeeklyReport {
     status: HealthStatus | 'NA';
   };
   bottlenecks: string[];
-
-  // Section 3: Top Team Threads
   threads: ThreadRow[];
-
-  // Audit
   createdBy: string;
   updatedBy: string;
   publishedBy?: string;

@@ -1,4 +1,3 @@
-
 export function getISOWeek(date: Date): number {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
   const dayNum = d.getUTCDay() || 7;
@@ -28,4 +27,16 @@ export function formatISODate(dateStr: string): string {
     day: 'numeric',
     year: 'numeric'
   });
+}
+
+export function formatLocalISODate(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+export function parseISODateToLocal(isoDate: string): Date {
+  const [y, m, d] = (isoDate || '').split('-').map(Number);
+  return new Date(y, (m || 1) - 1, d || 1);
 }

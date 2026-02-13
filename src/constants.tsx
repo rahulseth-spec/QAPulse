@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { User, Project, ReportStatus, WeeklyReport, HealthStatus, ConfidenceLevel, LoadStatus, ThreadStatus, OwnerRole } from './types';
 
@@ -44,7 +43,6 @@ export const MOCK_REPORTS: WeeklyReport[] = [
       { decisionText: 'Switch to Postgres for scale', ownerRole: OwnerRole.QA, dueDate: '2024-05-25' }
     ],
     sprintHealth: { startDate: '2024-05-13', goalClarity: HealthStatus.GREEN, readiness: HealthStatus.GREEN },
-    // FIX: Added missing uedHealth property to satisfy the WeeklyReport interface requirements.
     uedHealth: {
       lastDiscussion: '2024-05-10',
       daysSinceLast: '3',
