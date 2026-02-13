@@ -63,6 +63,7 @@ export interface DecisionItem {
 }
 
 export interface ThreadRow {
+  product?: string;
   thread: string;
   ownerId: string;
   status: ThreadStatus;
@@ -89,6 +90,7 @@ export interface WeeklyReport {
   };
   strength: {
     activeContributors: number;
+    activeContributorNames?: string;
     criticalRoleGaps: boolean;
     gapNotes?: string;
   };

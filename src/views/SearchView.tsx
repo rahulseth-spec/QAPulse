@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { WeeklyReport, Project, ReportStatus } from '../types';
 import { Link } from 'react-router-dom';
 import { formatISODate, getMonthName } from '../utils';
+import { ThemedSelect, type ThemedSelectOption } from '../components/ThemedSelect';
 
 interface SearchProps {
   reports: WeeklyReport[];
@@ -21,6 +22,20 @@ const SearchView: React.FC<SearchProps> = ({ reports, projects }) => {
   const years = ['2023', '2024', '2025', '2026'];
   const months = Array.from({ length: 12 }, (_, i) => ({ val: (i + 1).toString(), label: new Date(2000, i).toLocaleString('default', { month: 'long' }) }));
   const weeks = ['1', '2', '3', '4', '5'];
+
+  const projectOptions: ThemedSelectOption[] = [
+    { value: '', label: 'All Projects' },
+    ...projects.map(p => ({ value: p.id, label: p.code })),
+  ];
+
+  const statusOptions: ThemedSelectOption[] = [
+    { value: '', label: 'Any' },
+    ...Object.values(ReportStatus).map(s => ({ value: s, label: s })),
+  ];
+
+  const monthOptions: ThemedSelectOption[] = [{ value: '', label: 'Any' }, ...months.map(m => ({ value: m.val, label: m.label }))];
+  const yearOptions: ThemedSelectOption[] = years.map(y => ({ value: y, label: y }));
+  const weekOptions: ThemedSelectOption[] = [{ value: '', label: 'Any' }, ...weeks.map(w => ({ value: w, label: w }))];
 
   const filteredReports = reports.filter(r => {
     const matchesQuery = r.title.toLowerCase().includes(filters.query.toLowerCase());
@@ -49,37 +64,47 @@ const SearchView: React.FC<SearchProps> = ({ reports, projects }) => {
           </div>
           <div>
             <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Project</label>
-            <select className="w-full border rounded-lg px-3 py-2" value={filters.projectId} onChange={e => setFilters({...filters, projectId: e.target.value})}>
-              <option value="">All Projects</option>
-              {projects.map(p => <option key={p.id} value={p.id}>{p.code}</option>)}
-            </select>
+            <ThemedSelect
+              value={filters.projectId}
+              onChange={(projectId) => setFilters({ ...filters, projectId })}
+              options={projectOptions}
+              placeholder="All Projects"
+            />
           </div>
           <div>
             <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Status</label>
-            <select className="w-full border rounded-lg px-3 py-2" value={filters.status} onChange={e => setFilters({...filters, status: e.target.value})}>
-              <option value="">Any</option>
-              {Object.values(ReportStatus).map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
+            <ThemedSelect
+              value={filters.status}
+              onChange={(status) => setFilters({ ...filters, status })}
+              options={statusOptions}
+              placeholder="Any"
+            />
           </div>
           <div>
             <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Month</label>
-            <select className="w-full border rounded-lg px-3 py-2" value={filters.month} onChange={e => setFilters({...filters, month: e.target.value})}>
-              <option value="">Any</option>
-              {months.map(m => <option key={m.val} value={m.val}>{m.label}</option>)}
-            </select>
+            <ThemedSelect
+              value={filters.month}
+              onChange={(month) => setFilters({ ...filters, month })}
+              options={monthOptions}
+              placeholder="Any"
+            />
           </div>
           <div>
             <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Year</label>
-            <select className="w-full border rounded-lg px-3 py-2" value={filters.year} onChange={e => setFilters({...filters, year: e.target.value})}>
-              {years.map(y => <option key={y} value={y}>{y}</option>)}
-            </select>
+            <ThemedSelect
+              value={filters.year}
+              onChange={(year) => setFilters({ ...filters, year })}
+              options={yearOptions}
+            />
           </div>
           <div>
             <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Week</label>
-            <select className="w-full border rounded-lg px-3 py-2" value={filters.weekOfMonth} onChange={e => setFilters({...filters, weekOfMonth: e.target.value})}>
-              <option value="">Any</option>
-              {weeks.map(w => <option key={w} value={w}>{w}</option>)}
-            </select>
+            <ThemedSelect
+              value={filters.weekOfMonth}
+              onChange={(weekOfMonth) => setFilters({ ...filters, weekOfMonth })}
+              options={weekOptions}
+              placeholder="Any"
+            />
           </div>
         </div>
       </div>

@@ -67,8 +67,8 @@ body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI
 
 .softqa-topbrand {
   position: absolute;
-  top: 36px;
-  left: 36px;
+  top: 24px;
+  left: 24px;
 }
 
 .softqa-right {
@@ -461,4 +461,20 @@ body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI
   .softqa-card { padding: 24px; }
   .softqa-right-headline { font-size: 32px; }
   .softqa-topbrand { position: static; margin-bottom: 14px; }
+}
+
+@media print {
+  @page { size: landscape; margin: 12mm; }
+  body { background: #ffffff !important; }
+
+  body * { visibility: hidden !important; }
+  #printable-report, #printable-report * { visibility: visible !important; }
+  #printable-report {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+
+  .print-hide { display: none !important; }
 }

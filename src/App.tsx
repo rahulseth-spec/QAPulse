@@ -4,7 +4,6 @@ import { User, WeeklyReport, Project } from './types';
 import { MOCK_USERS, MOCK_PROJECTS, MOCK_REPORTS } from './constants';
 import DashboardView from './views/DashboardView';
 import EditorView from './views/EditorView';
-import SearchView from './views/SearchView';
 import DetailView from './views/DetailView';
 import DocumentationView from './views/DocumentationView';
 import WeeklyReportView from './views/WeeklyReportView';
@@ -706,10 +705,9 @@ const App: React.FC = () => {
       <Layout user={currentUser} logout={() => { setCurrentUser(null); localStorage.removeItem('qapulse_auth'); setIsSignup(false); setEmail(''); setName(''); setPassword(''); setError(''); }}>
         <Routes>
           <Route path="/" element={<DashboardView reports={reports} projects={projects} user={currentUser} users={users} />} />
-          <Route path="/weekly-reports" element={<WeeklyReportView reports={reports} projects={projects} />} />
-          <Route path="/search" element={<SearchView reports={reports} projects={projects} />} />
-          <Route path="/create" element={<EditorView onSave={handleAddReport} user={currentUser} projects={projects} />} />
-          <Route path="/edit/:id" element={<EditorView onSave={handleAddReport} user={currentUser} projects={projects} reports={reports} />} />
+          <Route path="/weekly-reports" element={<WeeklyReportView reports={reports} projects={projects} user={currentUser} onUpdate={handleAddReport} />} />
+          <Route path="/create" element={<EditorView onSave={handleAddReport} user={currentUser} projects={projects} users={users} />} />
+          <Route path="/edit/:id" element={<EditorView onSave={handleAddReport} user={currentUser} projects={projects} users={users} reports={reports} />} />
           <Route path="/report/:id" element={<DetailView reports={reports} projects={projects} user={currentUser} users={users} onUpdate={handleAddReport} onDelete={handleDeleteReport} />} />
           <Route path="/docs" element={<DocumentationView />} />
           <Route path="*" element={<Navigate to="/" />} />
