@@ -69,9 +69,35 @@ export interface ThreadRow {
   status: ThreadStatus;
 }
 
+export type WeeklyReportScope = 'PROJECT' | 'OVERALL';
+
+export interface ExecutionReadinessSlide {
+  projectId: string;
+  capacity: {
+    plannedHours: number;
+    committedHours: number;
+    surplusDeficitHours: number;
+    loadStatus: LoadStatus;
+  };
+  strength: {
+    activeContributors: number;
+    activeContributorNames?: string;
+    criticalRoleGaps: boolean;
+    gapNotes?: string;
+  };
+  sprintHealth: {
+    startDate: string;
+    goalClarity: HealthStatus | 'NA';
+    readiness: HealthStatus | 'NA';
+  };
+  bottlenecks: string[];
+  decisions: DecisionItem[];
+}
+
 export interface WeeklyReport {
   id: string;
   projectId: string;
+  scope?: WeeklyReportScope;
   title: string;
   startDate: string;
   endDate: string;
@@ -100,6 +126,7 @@ export interface WeeklyReport {
     goalClarity: HealthStatus | 'NA';
     readiness: HealthStatus | 'NA';
   };
+  executionReadinessSlides?: ExecutionReadinessSlide[];
   uedHealth: {
     lastDiscussion: string;
     daysSinceLast: string;

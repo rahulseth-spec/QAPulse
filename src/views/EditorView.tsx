@@ -4,9 +4,10 @@ import DatePicker from 'react-datepicker';
 import { 
   WeeklyReport, Project, User, ReportStatus, GoalRow,
   HealthStatus, ConfidenceLevel, LoadStatus, OwnerRole,
-  ThreadStatus
+  ThreadStatus,
+  ExecutionReadinessSlide
 } from '../types';
-import { formatLocalISODate, getISOWeek, getMonthName, getWeekOfMonth, parseISODateToLocal } from '../utils';
+import { formatISODate, formatLocalISODate, getISOWeek, getMonthName, getWeekOfMonth, parseISODateToLocal } from '../utils';
 import { ThemedSelect, type ThemedSelectOption } from '../components/ThemedSelect';
 
 interface EditorProps {
@@ -15,6 +16,7 @@ interface EditorProps {
   projects: Project[];
   users: User[];
   reports?: WeeklyReport[];
+  mode?: 'create' | 'edit' | 'view';
 }
 
 const GOAL_ROWS = 1;
@@ -22,12 +24,17 @@ const BOTTLENECK_ROWS = 3;
 const DECISION_ROWS = 3;
 const THREAD_ROWS = 1;
 
-const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, reports = [] }) => {
+const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, reports = [], mode: modeProp }) => {
   const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
   const isEditing = !!id;
   const firstErrorRef = useRef<HTMLDivElement>(null);
+  const existingForEdit = isEditing ? reports.find(r => r.id === id) : undefined;
+  const resolvedMode = modeProp ?? (isEditing ? 'edit' : 'create');
+  const isViewMode = resolvedMode === 'view';
+  const canManage = isViewMode ? false : (!isEditing || (existingForEdit?.createdBy === user.id));
+  const isOverallMode = (existingForEdit?.scope === 'OVERALL') || (new URLSearchParams(location.search).get('mode') === 'overall');
   
   const todayISO = formatLocalISODate(new Date());
   const addDaysISO = (isoDate: string, days: number) => {
@@ -67,12 +74,15 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
 
   const buildNewReportFormData = (search: string): Partial<WeeklyReport> => {
     const queryParams = new URLSearchParams(search);
-    const initialProjectId = queryParams.get('projectId') || projects[0]?.id || '';
+    const mode = queryParams.get('mode');
+    const isOverall = mode === 'overall';
+    const initialProjectId = isOverall ? '' : (queryParams.get('projectId') || projects[0]?.id || '');
     const initialStartDate = queryParams.get('startDate') || todayISO;
     const initialEndDate = queryParams.get('endDate') || addDaysISO(initialStartDate, 4);
 
-    return {
+    const base: Partial<WeeklyReport> = {
       projectId: initialProjectId,
+      scope: isOverall ? 'OVERALL' : 'PROJECT',
       startDate: initialStartDate,
       endDate: initialEndDate,
       status: ReportStatus.DRAFT,
@@ -84,6 +94,26 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
       sprintHealth: { startDate: initialStartDate, goalClarity: HealthStatus.GREEN, readiness: HealthStatus.GREEN },
       uedHealth: { lastDiscussion: '', daysSinceLast: '', nextScheduled: '', dataAvailable: false, status: 'NA' },
       bottlenecks: padArray([], BOTTLENECK_ROWS, () => ''),
+    };
+
+    if (!isOverall) return base;
+
+    const firstProjectId = projects[0]?.id || '';
+    const slide: ExecutionReadinessSlide = {
+      projectId: firstProjectId,
+      capacity: { plannedHours: 40, committedHours: 40, surplusDeficitHours: 0, loadStatus: LoadStatus.NORMAL },
+      strength: { activeContributors: 0, activeContributorNames: '', criticalRoleGaps: false, gapNotes: '' },
+      sprintHealth: { startDate: initialStartDate, goalClarity: HealthStatus.GREEN, readiness: HealthStatus.GREEN },
+      bottlenecks: padArray([], BOTTLENECK_ROWS, () => ''),
+      decisions: padArray([], DECISION_ROWS, () => ({ decisionText: '', ownerRole: OwnerRole.QA, dueDate: '' })),
+    };
+    return {
+      ...base,
+      projectId: '',
+      executionReadinessSlides: [slide],
+      capacity: slide.capacity,
+      strength: slide.strength,
+      sprintHealth: slide.sprintHealth,
     };
   };
 
@@ -99,9 +129,68 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
     const plannedHours = existing.capacity?.plannedHours ?? 0;
     const committedHours = existing.capacity?.committedHours ?? 0;
     const surplusDeficitHours = plannedHours - committedHours;
+    const normalizedScope = existing.scope ?? (existing.executionReadinessSlides?.length ? 'OVERALL' : 'PROJECT');
+    const normalizedSlides = (existing.executionReadinessSlides || []).map(s => {
+      const p = s.capacity?.plannedHours ?? 0;
+      const c = s.capacity?.committedHours ?? 0;
+      const slideBottlenecks = padArray((s as any).bottlenecks ?? existing.bottlenecks ?? [], BOTTLENECK_ROWS, () => '');
+      const slideDecisions = padArray((s as any).decisions ?? existing.decisions ?? [], DECISION_ROWS, () => ({ decisionText: '', ownerRole: OwnerRole.QA, dueDate: '' }));
+      return {
+        projectId: s.projectId || '',
+        capacity: {
+          plannedHours: p,
+          committedHours: c,
+          surplusDeficitHours: p - c,
+          loadStatus: s.capacity?.loadStatus ?? LoadStatus.NORMAL,
+        },
+        strength: {
+          activeContributors: s.strength?.activeContributors ?? 0,
+          activeContributorNames: s.strength?.activeContributorNames ?? '',
+          criticalRoleGaps: s.strength?.criticalRoleGaps ?? false,
+          gapNotes: s.strength?.gapNotes ?? '',
+        },
+        sprintHealth: {
+          startDate: s.sprintHealth?.startDate ?? existing.startDate,
+          goalClarity: s.sprintHealth?.goalClarity ?? HealthStatus.GREEN,
+          readiness: s.sprintHealth?.readiness ?? HealthStatus.GREEN,
+        },
+        bottlenecks: slideBottlenecks,
+        decisions: slideDecisions,
+      } satisfies ExecutionReadinessSlide;
+    });
+    const effectiveSlides =
+      normalizedScope === 'OVERALL'
+        ? (normalizedSlides.length
+            ? normalizedSlides
+            : [
+                {
+                  projectId: projects[0]?.id || '',
+                  capacity: {
+                    plannedHours,
+                    committedHours,
+                    surplusDeficitHours,
+                    loadStatus: existing.capacity?.loadStatus ?? LoadStatus.NORMAL,
+                  },
+                  strength: {
+                    activeContributors: existing.strength?.activeContributors ?? 0,
+                    activeContributorNames: existing.strength?.activeContributorNames ?? '',
+                    criticalRoleGaps: existing.strength?.criticalRoleGaps ?? false,
+                    gapNotes: existing.strength?.gapNotes ?? '',
+                  },
+                  sprintHealth: {
+                    startDate: existing.sprintHealth?.startDate ?? existing.startDate,
+                    goalClarity: existing.sprintHealth?.goalClarity ?? HealthStatus.GREEN,
+                    readiness: existing.sprintHealth?.readiness ?? HealthStatus.GREEN,
+                  },
+                  bottlenecks: bottlenecks,
+                  decisions: decisions,
+                } satisfies ExecutionReadinessSlide,
+              ])
+        : undefined;
 
     return {
       ...existing,
+      scope: normalizedScope,
       goals,
       bottlenecks,
       decisions,
@@ -123,6 +212,7 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
         goalClarity: existing.sprintHealth?.goalClarity ?? HealthStatus.GREEN,
         readiness: existing.sprintHealth?.readiness ?? HealthStatus.GREEN,
       },
+      executionReadinessSlides: effectiveSlides,
       uedHealth: {
         lastDiscussion: existing.uedHealth?.lastDiscussion ?? '',
         daysSinceLast: existing.uedHealth?.daysSinceLast ?? '',
@@ -135,16 +225,28 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
 
   useEffect(() => {
     if (isEditing) {
-      const existing = reports.find(r => r.id === id);
-      if (existing) setFormData(normalizeExistingForEditor(existing));
+      if (existingForEdit) setFormData(normalizeExistingForEditor(existingForEdit));
     }
-  }, [id, reports, isEditing]);
+  }, [existingForEdit, isEditing]);
+
+  useEffect(() => {
+    if (!isEditing) return;
+    if (!isViewMode && existingForEdit && !canManage) {
+      navigate(`/report/${existingForEdit.id}`, { replace: true });
+    }
+  }, [canManage, existingForEdit, isEditing, isViewMode, navigate]);
 
   useEffect(() => {
     if (isEditing) return;
     setFormData(buildNewReportFormData(location.search));
     setLastSavedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
   }, [isEditing, location.search]);
+
+  useEffect(() => {
+    if (!isViewMode) return;
+    if (!existingForEdit?.updatedAt) return;
+    setLastSavedTime(formatISODate(existingForEdit.updatedAt));
+  }, [existingForEdit?.updatedAt, isViewMode]);
 
   const computeActiveContributorCount = (names: string) => {
     const parts = names
@@ -155,7 +257,8 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
   };
 
   const headerIsValid = (() => {
-    if (!formData.projectId || !formData.startDate || !formData.endDate) return false;
+    if (!formData.startDate || !formData.endDate) return false;
+    if (!isOverallMode && !formData.projectId) return false;
     if (!isWeekdayISO(formData.startDate) || !isWeekdayISO(formData.endDate)) return false;
     if (parseISODateToLocal(formData.endDate) < parseISODateToLocal(formData.startDate)) return false;
     const maxEnd = getWeekEndFridayISO(formData.startDate);
@@ -177,29 +280,38 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
       return false;
     }
 
-    const capacity = formData.capacity;
-    if (!capacity) return false;
-    if (!Number.isFinite(capacity.plannedHours) || capacity.plannedHours <= 0) return false;
-    if (!Number.isFinite(capacity.committedHours) || capacity.committedHours <= 0) return false;
-    if (!capacity.loadStatus) return false;
+    if (isOverallMode) {
+      const slides = formData.executionReadinessSlides || [];
+      if (slides.length < 1) return false;
+      for (const s of slides) {
+        if (!s.projectId) return false;
+        if (!Number.isFinite(s.capacity?.plannedHours) || (s.capacity?.plannedHours ?? 0) <= 0) return false;
+        if (!Number.isFinite(s.capacity?.committedHours) || (s.capacity?.committedHours ?? 0) <= 0) return false;
+        if (!s.capacity?.loadStatus) return false;
+        if (!s.strength?.activeContributorNames?.trim()) return false;
+        if (computeActiveContributorCount(s.strength.activeContributorNames) <= 0) return false;
+        if (!s.sprintHealth?.startDate) return false;
+        if (s.sprintHealth.goalClarity === 'NA' || !s.sprintHealth.goalClarity) return false;
+        if (s.sprintHealth.readiness === 'NA' || !s.sprintHealth.readiness) return false;
+      }
+    } else {
+      const capacity = formData.capacity;
+      if (!capacity) return false;
+      if (!Number.isFinite(capacity.plannedHours) || capacity.plannedHours <= 0) return false;
+      if (!Number.isFinite(capacity.committedHours) || capacity.committedHours <= 0) return false;
+      if (!capacity.loadStatus) return false;
 
-    const strength = formData.strength;
-    if (!strength) return false;
-    if (!strength.activeContributorNames?.trim()) return false;
-    if (computeActiveContributorCount(strength.activeContributorNames) <= 0) return false;
+      const strength = formData.strength;
+      if (!strength) return false;
+      if (!strength.activeContributorNames?.trim()) return false;
+      if (computeActiveContributorCount(strength.activeContributorNames) <= 0) return false;
 
-    const sprintHealth = formData.sprintHealth;
-    if (!sprintHealth) return false;
-    if (!sprintHealth.startDate) return false;
-    if (sprintHealth.goalClarity === 'NA' || !sprintHealth.goalClarity) return false;
-    if (sprintHealth.readiness === 'NA' || !sprintHealth.readiness) return false;
-
-    const uedHealth = formData.uedHealth;
-    if (!uedHealth) return false;
-    if (!uedHealth.lastDiscussion.trim()) return false;
-    if (!uedHealth.daysSinceLast.trim()) return false;
-    if (!uedHealth.nextScheduled.trim()) return false;
-    if (uedHealth.status === 'NA' || !uedHealth.status) return false;
+      const sprintHealth = formData.sprintHealth;
+      if (!sprintHealth) return false;
+      if (!sprintHealth.startDate) return false;
+      if (sprintHealth.goalClarity === 'NA' || !sprintHealth.goalClarity) return false;
+      if (sprintHealth.readiness === 'NA' || !sprintHealth.readiness) return false;
+    }
 
     const bottlenecks = formData.bottlenecks || [];
     if (bottlenecks.length < BOTTLENECK_ROWS) return false;
@@ -240,6 +352,7 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
   })();
 
   const handleAction = (status: ReportStatus) => {
+    if (!canManage) return;
     if (status === ReportStatus.PUBLISHED) {
       if (!publishIsValid) {
         firstErrorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -264,12 +377,46 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
     const isoWeek = getISOWeek(startDateObj);
     const month = startDateObj.getMonth() + 1;
     const weekOfMonth = getWeekOfMonth(startDateObj);
-    const projectName = projects.find(p => p.id === formData.projectId)?.name;
-    const computedActive = computeActiveContributorCount(formData.strength?.activeContributorNames || '');
+    const projectName = isOverallMode ? 'All Projects' : projects.find(p => p.id === formData.projectId)?.name;
+    const existing = isEditing ? existingForEdit : undefined;
+    if (isEditing && (!existing || existing.createdBy !== user.id)) return;
+    const createdBy = existing?.createdBy || user.id;
+    const createdAt = existing?.createdAt || new Date().toISOString();
+    const computedSlides = isOverallMode
+      ? (formData.executionReadinessSlides || []).map(s => {
+          const plannedHours = s.capacity?.plannedHours ?? 0;
+          const committedHours = s.capacity?.committedHours ?? 0;
+          const activeContributors = computeActiveContributorCount(s.strength?.activeContributorNames || '');
+          const slideBottlenecks = padArray(s.bottlenecks || [], BOTTLENECK_ROWS, () => '');
+          const slideDecisions = padArray(s.decisions || [], DECISION_ROWS, () => ({ decisionText: '', ownerRole: OwnerRole.QA, dueDate: '' }));
+          return {
+            projectId: s.projectId,
+            capacity: {
+              plannedHours,
+              committedHours,
+              surplusDeficitHours: plannedHours - committedHours,
+              loadStatus: s.capacity?.loadStatus ?? LoadStatus.NORMAL,
+            },
+            strength: {
+              ...s.strength,
+              activeContributors,
+            },
+            sprintHealth: s.sprintHealth,
+            bottlenecks: slideBottlenecks,
+            decisions: slideDecisions,
+          } satisfies ExecutionReadinessSlide;
+        })
+      : undefined;
+
+    const primarySlide = computedSlides?.[0];
+    const computedActive = computeActiveContributorCount(
+      (isOverallMode ? primarySlide?.strength?.activeContributorNames : formData.strength?.activeContributorNames) || '',
+    );
 
     const newReport: WeeklyReport = {
       id: isEditing ? id! : `r-${Date.now()}`,
-      projectId: formData.projectId!,
+      projectId: isOverallMode ? '' : (formData.projectId || ''),
+      scope: isOverallMode ? 'OVERALL' : 'PROJECT',
       title: formatTitle(projectName, formData.startDate!),
       startDate: formData.startDate!,
       endDate: formData.endDate!,
@@ -279,20 +426,21 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
       weekOfMonth,
       status,
       goals: formData.goals || [],
-      capacity: formData.capacity!,
+      capacity: (isOverallMode ? primarySlide?.capacity : formData.capacity)!,
       strength: {
-        ...formData.strength!,
+        ...(isOverallMode ? primarySlide?.strength : formData.strength)!,
         activeContributors: computedActive,
       },
-      decisions: formData.decisions || [],
-      sprintHealth: formData.sprintHealth!,
+      decisions: (isOverallMode ? primarySlide?.decisions : formData.decisions) || [],
+      sprintHealth: (isOverallMode ? primarySlide?.sprintHealth : formData.sprintHealth)!,
+      executionReadinessSlides: computedSlides,
       uedHealth: formData.uedHealth!,
-      bottlenecks: formData.bottlenecks || [],
+      bottlenecks: (isOverallMode ? primarySlide?.bottlenecks : formData.bottlenecks) || [],
       threads: formData.threads || [],
-      createdBy: user.id,
+      createdBy,
       updatedBy: user.id,
       publishedBy: status === ReportStatus.PUBLISHED ? user.id : undefined,
-      createdAt: new Date().toISOString(),
+      createdAt,
       updatedAt: new Date().toISOString(),
     };
 
@@ -300,6 +448,8 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
     setLastSavedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
     if (status === ReportStatus.PUBLISHED) {
       navigate(`/report/${newReport.id}`);
+    } else {
+      navigate('/weekly-reports');
     }
   };
 
@@ -357,13 +507,13 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
 
   const sectionTitleClasses = "text-[12px] font-bold text-slate-900 tracking-tight";
   const pageTitleClasses = "text-[14px] font-bold text-slate-900 tracking-tight";
-  const pageTitleOnColorClasses = "text-[14px] font-bold text-white tracking-tight";
+  const pageTitleOnColorClasses = "text-[14px] font-bold text-[#073D44] tracking-tight";
   const fieldRowClasses = "grid grid-cols-1 sm:grid-cols-[170px_1fr] items-center gap-2 sm:gap-3";
   const fieldLabelClasses = "text-[12px] text-slate-500";
   const actionButtonClasses =
     "h-10 px-4 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-[13px] hover:bg-slate-50 transition-colors";
   const headerActionButtonClasses =
-    "h-10 px-4 rounded-xl bg-white/10 border border-white/20 text-white font-semibold text-[13px] hover:bg-white/15 transition-colors";
+    "h-10 px-4 rounded-xl bg-white/60 border border-[#073D44]/20 text-[#073D44] font-semibold text-[13px] hover:bg-white/80 transition-colors";
   const removeButtonClasses =
     "h-10 px-4 rounded-xl bg-white border border-slate-200 text-slate-600 font-semibold text-[13px] hover:bg-slate-50 hover:text-slate-900 transition-colors";
 
@@ -413,8 +563,93 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
     });
   };
 
+  const updateExecutionSlide = (idx: number, partial: Partial<ExecutionReadinessSlide>) => {
+    setFormData(prev => {
+      const current = [...(prev.executionReadinessSlides || [])];
+      if (!current[idx]) return prev;
+      const prevSlide = current[idx];
+
+      const plannedHours = partial.capacity?.plannedHours ?? prevSlide.capacity.plannedHours ?? 0;
+      const committedHours = partial.capacity?.committedHours ?? prevSlide.capacity.committedHours ?? 0;
+
+      const nextSlide: ExecutionReadinessSlide = {
+        projectId: partial.projectId ?? prevSlide.projectId,
+        capacity: {
+          plannedHours,
+          committedHours,
+          surplusDeficitHours: plannedHours - committedHours,
+          loadStatus: partial.capacity?.loadStatus ?? prevSlide.capacity.loadStatus,
+        },
+        strength: {
+          activeContributors: partial.strength?.activeContributors ?? prevSlide.strength.activeContributors ?? 0,
+          activeContributorNames: partial.strength?.activeContributorNames ?? prevSlide.strength.activeContributorNames,
+          criticalRoleGaps: partial.strength?.criticalRoleGaps ?? prevSlide.strength.criticalRoleGaps,
+          gapNotes: partial.strength?.gapNotes ?? prevSlide.strength.gapNotes,
+        },
+        sprintHealth: {
+          startDate: partial.sprintHealth?.startDate ?? prevSlide.sprintHealth.startDate,
+          goalClarity: partial.sprintHealth?.goalClarity ?? prevSlide.sprintHealth.goalClarity,
+          readiness: partial.sprintHealth?.readiness ?? prevSlide.sprintHealth.readiness,
+        },
+        bottlenecks: partial.bottlenecks ?? prevSlide.bottlenecks,
+        decisions: partial.decisions ?? prevSlide.decisions,
+      };
+
+      current[idx] = nextSlide;
+      const next: Partial<WeeklyReport> = { ...prev, executionReadinessSlides: current };
+      if (idx === 0) {
+        next.capacity = nextSlide.capacity;
+        next.strength = nextSlide.strength;
+        next.sprintHealth = nextSlide.sprintHealth;
+        next.bottlenecks = nextSlide.bottlenecks;
+        next.decisions = nextSlide.decisions;
+      }
+      return next;
+    });
+  };
+
+  const addExecutionSlide = () => {
+    setFormData(prev => {
+      const current = [...(prev.executionReadinessSlides || [])];
+      const base = current[current.length - 1] || {
+        projectId: projects[0]?.id || '',
+        capacity: prev.capacity || { plannedHours: 40, committedHours: 40, surplusDeficitHours: 0, loadStatus: LoadStatus.NORMAL },
+        strength: prev.strength || { activeContributors: 0, activeContributorNames: '', criticalRoleGaps: false, gapNotes: '' },
+        sprintHealth: prev.sprintHealth || { startDate: prev.startDate || todayISO, goalClarity: HealthStatus.GREEN, readiness: HealthStatus.GREEN },
+        bottlenecks: padArray(prev.bottlenecks || [], BOTTLENECK_ROWS, () => ''),
+        decisions: padArray(prev.decisions || [], DECISION_ROWS, () => ({ decisionText: '', ownerRole: OwnerRole.QA, dueDate: '' })),
+      };
+
+      current.push({
+        ...base,
+        projectId: base.projectId || projects[0]?.id || '',
+      });
+
+      return { ...prev, executionReadinessSlides: current };
+    });
+  };
+
+  const removeExecutionSlide = (idx: number) => {
+    setFormData(prev => {
+      const current = [...(prev.executionReadinessSlides || [])];
+      if (current.length <= 1) return prev;
+      current.splice(idx, 1);
+      const next: Partial<WeeklyReport> = { ...prev, executionReadinessSlides: current };
+      if (idx === 0 && current[0]) {
+        next.capacity = current[0].capacity;
+        next.strength = current[0].strength;
+        next.sprintHealth = current[0].sprintHealth;
+        next.bottlenecks = current[0].bottlenecks;
+        next.decisions = current[0].decisions;
+      }
+      return next;
+    });
+  };
+
   const reportProject = projects.find(p => p.id === formData.projectId);
-  const reportTitle = formData.startDate ? formatTitle(reportProject?.name, formData.startDate) : 'Weekly Snapshot';
+  const reportTitle = formData.startDate
+    ? formatTitle(isOverallMode ? 'All Projects' : reportProject?.name, formData.startDate)
+    : 'Weekly Snapshot';
 
   const addGoalRow = () => {
     setFormData(prev => ({
@@ -478,29 +713,38 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
       <div className="bg-gradient-to-br from-[#073D44] to-[#407B7E] rounded-[20px] p-8 md:p-10 text-white border border-white/10 shadow-sm">
         <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
-            <h1 className="text-[28px] leading-[36px] font-bold tracking-tight">{isEditing ? 'Edit Weekly Report' : 'Create Weekly Report'}</h1>
+            <h1 className="text-[28px] leading-[36px] font-bold tracking-tight">
+              {isViewMode ? 'Weekly Report' : isEditing ? 'Edit Weekly Report' : 'Create Weekly Report'}
+            </h1>
             <p className="mt-2 text-[15px] leading-[24px] text-white/80">Landscape report template with required publish validation.</p>
+            {isEditing && !isViewMode && !canManage && (
+              <p className="mt-2 text-[13px] leading-[20px] text-white/90 font-semibold">
+                You do not have access to edit this report.
+              </p>
+            )}
           </div>
-          <div className="flex gap-3 shrink-0">
-            <button
-              className={`h-12 px-5 rounded-xl text-white font-semibold text-[14px] border transition-colors ${
-                draftIsValid && headerIsValid ? 'bg-white/10 border-white/15 hover:bg-white/15' : 'bg-white/5 border-white/10 opacity-60 cursor-not-allowed'
-              }`}
-              onClick={() => handleAction(ReportStatus.DRAFT)}
-              disabled={!draftIsValid || !headerIsValid}
-            >
-              Save Draft
-            </button>
-            <button
-              className={`h-12 px-5 rounded-xl font-semibold text-[14px] transition-colors ${
-                publishIsValid ? 'bg-white text-[#073D44] hover:bg-white/90' : 'bg-white/70 text-[#073D44]/70 opacity-70 cursor-not-allowed'
-              }`}
-              onClick={() => handleAction(ReportStatus.PUBLISHED)}
-              disabled={!publishIsValid}
-            >
-              Publish
-            </button>
-          </div>
+          {!isViewMode && (
+            <div className="flex gap-3 shrink-0">
+              <button
+                className={`h-12 px-5 rounded-xl text-white font-semibold text-[14px] border transition-colors ${
+                  draftIsValid && headerIsValid ? 'bg-white/10 border-white/15 hover:bg-white/15' : 'bg-white/5 border-white/10 opacity-60 cursor-not-allowed'
+                }`}
+                onClick={() => handleAction(ReportStatus.DRAFT)}
+                disabled={!canManage || !draftIsValid || !headerIsValid}
+              >
+                Save Draft
+              </button>
+              <button
+                className={`h-12 px-5 rounded-xl font-semibold text-[14px] transition-colors ${
+                  publishIsValid ? 'bg-white text-[#073D44] hover:bg-white/90' : 'bg-white/70 text-[#073D44]/70 opacity-70 cursor-not-allowed'
+                }`}
+                onClick={() => handleAction(ReportStatus.PUBLISHED)}
+                disabled={!canManage || !publishIsValid}
+              >
+                Publish
+              </button>
+            </div>
+          )}
         </div>
         <div ref={firstErrorRef} />
       </div>
@@ -510,20 +754,27 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="space-y-2">
             <label className="block text-[12px] font-semibold text-slate-600">Project</label>
-            <ThemedSelect
-              value={formData.projectId ?? ''}
-              onChange={(projectId) => setFormData(prev => ({ ...prev, projectId }))}
-              options={projectOptions}
-              placeholder={projectOptions.length > 0 ? 'Select project/program' : 'No projects available'}
-              disabled={projectOptions.length === 0}
-              buttonClassName={headerSelectButtonClasses}
-            />
+            {isOverallMode ? (
+              <div className={`${headerSelectButtonClasses} flex items-center justify-between bg-slate-50 text-slate-700`}>
+                All Projects
+              </div>
+            ) : (
+              <ThemedSelect
+                value={formData.projectId ?? ''}
+                onChange={(projectId) => setFormData(prev => ({ ...prev, projectId }))}
+                options={projectOptions}
+                placeholder={projectOptions.length > 0 ? 'Select project/program' : 'No projects available'}
+                disabled={isViewMode || projectOptions.length === 0}
+                buttonClassName={headerSelectButtonClasses}
+              />
+            )}
           </div>
           <div className="space-y-2">
             <label className="block text-[12px] font-semibold text-slate-600">Start Date (Mon–Fri)</label>
             <DatePicker
               icon={null}
               selected={formData.startDate ? parseISODateToLocal(formData.startDate) : null}
+              disabled={isViewMode}
               onChange={(date: Date | null) =>
                 setFormData(prev => {
                   if (!date) return prev;
@@ -537,6 +788,12 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
                       ? prevEndObj
                       : maxEndObj;
                   const nextEnd = formatLocalISODate(nextEndObj);
+                  const nextSlides = isOverallMode
+                    ? (prev.executionReadinessSlides || []).map(s => ({
+                        ...s,
+                        sprintHealth: { ...s.sprintHealth, startDate: nextStart },
+                      }))
+                    : prev.executionReadinessSlides;
 
                   return {
                     ...prev,
@@ -546,6 +803,7 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
                       ...(prev.sprintHealth || { startDate: nextStart, goalClarity: HealthStatus.GREEN, readiness: HealthStatus.GREEN }),
                       startDate: nextStart,
                     },
+                    executionReadinessSlides: nextSlides,
                   };
                 })
               }
@@ -563,6 +821,7 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
             <DatePicker
               icon={null}
               selected={formData.endDate ? parseISODateToLocal(formData.endDate) : null}
+              disabled={isViewMode}
               onChange={(date: Date | null) =>
                 setFormData(prev => {
                   if (!date) return prev;
@@ -584,23 +843,25 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
         </div>
         <div className="flex flex-col gap-1">
           <div className="text-[12px] font-semibold text-slate-700">{reportTitle}</div>
-          <div className="text-[12px] text-slate-500">Last saved: {lastSavedTime}</div>
+          <div className="text-[12px] text-slate-500">{isViewMode ? `Updated: ${lastSavedTime}` : `Last saved: ${lastSavedTime}`}</div>
         </div>
       </section>
 
       <div className="space-y-8">
         <div className="bg-white border border-slate-200 rounded-[20px] shadow-sm overflow-hidden">
-          <div className="px-6 py-5 bg-gradient-to-r from-[#073D44] to-[#407B7E]">
-            <div className="text-[14px] font-semibold text-white">{reportTitle}</div>
+          <div className="px-6 py-5 bg-[#CFE8E8] border-b border-[#073D44]/15">
+            <div className="text-[14px] font-semibold text-[#073D44]">{reportTitle}</div>
             <div className="mt-4 flex items-center justify-between gap-3">
               <div className={pageTitleOnColorClasses}>Goals &amp; Team Health</div>
-              <button
-                type="button"
-                onClick={addGoalRow}
-                className={headerActionButtonClasses}
-              >
-                Add row
-              </button>
+              {!isViewMode && (
+                <button
+                  type="button"
+                  onClick={addGoalRow}
+                  className={headerActionButtonClasses}
+                >
+                  Add row
+                </button>
+              )}
             </div>
           </div>
           <div className="p-6">
@@ -621,6 +882,7 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
                       <td className="px-3 py-3">
                         <input
                           value={g.goal}
+                          readOnly={isViewMode}
                           onChange={(e) => {
                             const value = e.target.value;
                             setFormData(prev => {
@@ -636,6 +898,7 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
                       <td className="px-3 py-3">
                         <input
                           value={g.successMetric}
+                          readOnly={isViewMode}
                           onChange={(e) => {
                             const value = e.target.value;
                             setFormData(prev => {
@@ -659,6 +922,7 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
                             });
                           }}
                           options={healthOptions}
+                          disabled={isViewMode}
                           buttonClassName={cellSelectButtonClasses}
                           getOptionDotClassName={getHealthDotClassName}
                         />
@@ -674,12 +938,13 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
                             });
                           }}
                           options={confidenceOptions}
+                          disabled={isViewMode}
                           buttonClassName={cellSelectButtonClasses}
                           getOptionDotClassName={getConfidenceDotClassName}
                         />
                       </td>
                       <td className="px-3 py-3 text-right">
-                        {idx >= GOAL_ROWS && (formData.goals || []).length > GOAL_ROWS && (
+                        {!isViewMode && idx >= GOAL_ROWS && (formData.goals || []).length > GOAL_ROWS && (
                           <button
                             type="button"
                             onClick={() => removeGoalRow(idx)}
@@ -698,200 +963,426 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
         </div>
 
         <div className="bg-white border border-slate-200 rounded-[20px] shadow-sm overflow-hidden">
-          <div className="px-6 py-4 bg-gradient-to-r from-[#073D44] to-[#407B7E] flex items-center justify-between">
+          <div className="px-6 py-4 bg-[#CFE8E8] border-b border-[#073D44]/15 flex items-center justify-between">
             <div className={pageTitleOnColorClasses}>Execution Readiness &amp; Friction</div>
+            {isOverallMode && !isViewMode && (
+              <button
+                type="button"
+                onClick={addExecutionSlide}
+                className="inline-flex items-center gap-2 text-[#073D44] font-bold text-[13px] hover:text-[#062F34] transition-colors"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+                <span>Add slide</span>
+              </button>
+            )}
           </div>
           <div className="p-6">
-            <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-8">
-              <div className="space-y-8">
-                <div className="space-y-3">
-                  <div className={sectionTitleClasses}>Sprint Health</div>
-                  <div className="space-y-3">
-                    <div className={fieldRowClasses}>
-                      <span className={fieldLabelClasses}>Sprint start date</span>
-                      <input
-                        type="date"
-                        value={formData.sprintHealth?.startDate || ''}
-                        onChange={(e) => setFormData(prev => ({ ...prev, sprintHealth: { ...(prev.sprintHealth as any), startDate: e.target.value } }))}
-                        className={cellInputClasses}
-                      />
-                    </div>
-                    <div className={fieldRowClasses}>
-                      <span className={fieldLabelClasses}>Sprint goal clarity</span>
-                      <ThemedSelect
-                        value={(formData.sprintHealth?.goalClarity as any) || 'NA'}
-                        onChange={(value) => setFormData(prev => ({ ...prev, sprintHealth: { ...(prev.sprintHealth as any), goalClarity: value as any } }))}
-                        options={healthWithNAOptions}
-                        buttonClassName={cellSelectButtonClasses}
-                        getOptionDotClassName={getHealthDotClassName}
-                      />
-                    </div>
-                    <div className={fieldRowClasses}>
-                      <span className={fieldLabelClasses}>Sprint readiness</span>
-                      <ThemedSelect
-                        value={(formData.sprintHealth?.readiness as any) || 'NA'}
-                        onChange={(value) => setFormData(prev => ({ ...prev, sprintHealth: { ...(prev.sprintHealth as any), readiness: value as any } }))}
-                        options={healthWithNAOptions}
-                        buttonClassName={cellSelectButtonClasses}
-                        getOptionDotClassName={getHealthDotClassName}
-                      />
-                    </div>
-                  </div>
-                </div>
+            <div className={`mt-2 grid grid-cols-1 ${isOverallMode ? '' : 'md:grid-cols-2'} gap-8`}>
+              {isOverallMode ? (
+                <div className="space-y-6">
+                  {(formData.executionReadinessSlides || []).map((slide, slideIdx) => (
+                    <div
+                      key={`${slide.projectId || 'p'}-${slideIdx}`}
+                      className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4 space-y-6"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-[12px] font-bold text-slate-900 tracking-tight">Slide {slideIdx + 1}</div>
+                        {!isViewMode && (formData.executionReadinessSlides || []).length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => removeExecutionSlide(slideIdx)}
+                            className="h-9 px-3 rounded-xl bg-white border border-slate-200 text-slate-600 font-semibold text-[12px] hover:bg-slate-50 hover:text-slate-900 transition-colors"
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
 
-                <div className="space-y-3">
-                  <div className={sectionTitleClasses}>Team Health (Capacity)</div>
-                  <div className="space-y-3">
-                    <div className={fieldRowClasses}>
-                      <span className={fieldLabelClasses}>Planned team hours</span>
-                      <input
-                        type="number"
-                        value={formData.capacity?.plannedHours ?? 0}
-                        onChange={(e) => updateCapacity({ plannedHours: Number(e.target.value) })}
-                        className={cellInputClasses}
-                      />
-                    </div>
-                    <div className={fieldRowClasses}>
-                      <span className={fieldLabelClasses}>Committed team hours</span>
-                      <input
-                        type="number"
-                        value={formData.capacity?.committedHours ?? 0}
-                        onChange={(e) => updateCapacity({ committedHours: Number(e.target.value) })}
-                        className={cellInputClasses}
-                      />
-                    </div>
-                    <div className={fieldRowClasses}>
-                      <span className={fieldLabelClasses}>Surplus/Deficit (hrs)</span>
-                      <input
-                        value={formData.capacity?.surplusDeficitHours ?? 0}
-                        readOnly
-                        className={`${cellInputClasses} bg-slate-50 text-slate-600`}
-                      />
-                    </div>
-                    <div className={fieldRowClasses}>
-                      <span className={fieldLabelClasses}>Load status</span>
-                      <ThemedSelect
-                        value={formData.capacity?.loadStatus ?? LoadStatus.NORMAL}
-                        onChange={(value) => updateCapacity({ loadStatus: value as LoadStatus })}
-                        options={loadStatusOptions}
-                        buttonClassName={cellSelectButtonClasses}
-                        getOptionDotClassName={getLoadStatusDotClassName}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <div className={sectionTitleClasses}>Team Strength</div>
-                  <div className="space-y-3">
-                    <div className={fieldRowClasses}>
-                      <span className={fieldLabelClasses}>Active contributors</span>
-                      <input
-                        value={formData.strength?.activeContributorNames || ''}
-                        onChange={(e) => setFormData(prev => ({ ...prev, strength: { ...(prev.strength as any), activeContributorNames: e.target.value } }))}
-                        className={cellInputClasses}
-                        placeholder="e.g., Rahul, Priya"
-                      />
-                    </div>
-                    <div className={fieldRowClasses}>
-                      <span className={fieldLabelClasses}>Critical role gaps</span>
-                      <ThemedSelect
-                        value={(formData.strength?.criticalRoleGaps ?? false) ? 'YES' : 'NO'}
-                        onChange={(value) =>
-                          setFormData(prev => {
-                            const nextCritical = value === 'YES';
-                            return {
-                              ...prev,
-                              strength: {
-                                ...(prev.strength as any),
-                                criticalRoleGaps: nextCritical,
-                                gapNotes: nextCritical ? (prev.strength as any)?.gapNotes ?? '' : '',
-                              },
-                            };
-                          })
-                        }
-                        options={yesNoOptions}
-                        buttonClassName={cellSelectButtonClasses}
-                      />
-                    </div>
-                    {(formData.strength?.criticalRoleGaps ?? false) ? (
                       <div className={fieldRowClasses}>
-                        <span className={fieldLabelClasses}>Gap notes</span>
-                        <input
-                          value={formData.strength?.gapNotes || ''}
-                          onChange={(e) => setFormData(prev => ({ ...prev, strength: { ...(prev.strength as any), gapNotes: e.target.value } }))}
-                          className={cellInputClasses}
-                          placeholder="e.g., Need 1 automation engineer"
+                        <span className={fieldLabelClasses}>Project</span>
+                        <ThemedSelect
+                          value={slide.projectId}
+                          onChange={(projectId) => updateExecutionSlide(slideIdx, { projectId })}
+                          options={projectOptions}
+                          disabled={isViewMode}
+                          buttonClassName={cellSelectButtonClasses}
                         />
                       </div>
-                    ) : null}
-                  </div>
-                </div>
 
-                <div className="space-y-3">
-                  <div className={sectionTitleClasses}>UE/D Health</div>
+                      <div className="space-y-3">
+                        <div className={sectionTitleClasses}>Sprint Health</div>
+                        <div className="space-y-3">
+                          <div className={fieldRowClasses}>
+                            <span className={fieldLabelClasses}>Sprint start date</span>
+                            <DatePicker
+                              showIcon
+                              icon={
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                  <path
+                                    d="M8 3v2M16 3v2M4 8h16M6 5h12a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  />
+                                </svg>
+                              }
+                              selected={slide.sprintHealth?.startDate ? parseISODateToLocal(slide.sprintHealth.startDate) : null}
+                              disabled={isViewMode}
+                              onChange={(date: Date | null) => {
+                                const next = date ? formatLocalISODate(new Date(date.getFullYear(), date.getMonth(), date.getDate())) : '';
+                                updateExecutionSlide(slideIdx, { sprintHealth: { ...slide.sprintHealth, startDate: next } });
+                              }}
+                              placeholderText="dd-mm-yyyy"
+                              className={cellInputClasses}
+                              dateFormat="dd-MM-yyyy"
+                              calendarClassName="rounded-xl border border-slate-200 shadow-lg"
+                              popperClassName="z-50"
+                              wrapperClassName="w-full"
+                            />
+                          </div>
+                          <div className={fieldRowClasses}>
+                            <span className={fieldLabelClasses}>Sprint goal clarity</span>
+                            <ThemedSelect
+                              value={(slide.sprintHealth?.goalClarity as any) || 'NA'}
+                              onChange={(value) => updateExecutionSlide(slideIdx, { sprintHealth: { ...slide.sprintHealth, goalClarity: value as any } })}
+                              options={healthWithNAOptions}
+                              disabled={isViewMode}
+                              buttonClassName={cellSelectButtonClasses}
+                              getOptionDotClassName={getHealthDotClassName}
+                            />
+                          </div>
+                          <div className={fieldRowClasses}>
+                            <span className={fieldLabelClasses}>Sprint readiness</span>
+                            <ThemedSelect
+                              value={(slide.sprintHealth?.readiness as any) || 'NA'}
+                              onChange={(value) => updateExecutionSlide(slideIdx, { sprintHealth: { ...slide.sprintHealth, readiness: value as any } })}
+                              options={healthWithNAOptions}
+                              disabled={isViewMode}
+                              buttonClassName={cellSelectButtonClasses}
+                              getOptionDotClassName={getHealthDotClassName}
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <div className={sectionTitleClasses}>Team Health (Capacity)</div>
+                        <div className="space-y-3">
+                          <div className={fieldRowClasses}>
+                            <span className={fieldLabelClasses}>Planned team hours</span>
+                            <input
+                              type="number"
+                              value={slide.capacity?.plannedHours ?? 0}
+                              readOnly={isViewMode}
+                              onChange={(e) => updateExecutionSlide(slideIdx, { capacity: { ...slide.capacity, plannedHours: Number(e.target.value) } })}
+                              className={cellInputClasses}
+                            />
+                          </div>
+                          <div className={fieldRowClasses}>
+                            <span className={fieldLabelClasses}>Committed team hours</span>
+                            <input
+                              type="number"
+                              value={slide.capacity?.committedHours ?? 0}
+                              readOnly={isViewMode}
+                              onChange={(e) => updateExecutionSlide(slideIdx, { capacity: { ...slide.capacity, committedHours: Number(e.target.value) } })}
+                              className={cellInputClasses}
+                            />
+                          </div>
+                          <div className={fieldRowClasses}>
+                            <span className={fieldLabelClasses}>Surplus/Deficit (hrs)</span>
+                            <input
+                              value={slide.capacity?.surplusDeficitHours ?? 0}
+                              readOnly
+                              className={`${cellInputClasses} bg-slate-50 text-slate-600`}
+                            />
+                          </div>
+                          <div className={fieldRowClasses}>
+                            <span className={fieldLabelClasses}>Load status</span>
+                            <ThemedSelect
+                              value={slide.capacity?.loadStatus ?? LoadStatus.NORMAL}
+                              onChange={(value) => updateExecutionSlide(slideIdx, { capacity: { ...slide.capacity, loadStatus: value as LoadStatus } })}
+                              options={loadStatusOptions}
+                              disabled={isViewMode}
+                              buttonClassName={cellSelectButtonClasses}
+                              getOptionDotClassName={getLoadStatusDotClassName}
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <div className={sectionTitleClasses}>Team Strength</div>
+                        <div className="space-y-3">
+                          <div className={fieldRowClasses}>
+                            <span className={fieldLabelClasses}>Active contributors</span>
+                            <input
+                              value={slide.strength?.activeContributorNames || ''}
+                              readOnly={isViewMode}
+                              onChange={(e) => updateExecutionSlide(slideIdx, { strength: { ...slide.strength, activeContributorNames: e.target.value } })}
+                              className={cellInputClasses}
+                              placeholder="e.g., Rahul, Priya"
+                            />
+                          </div>
+                          <div className={fieldRowClasses}>
+                            <span className={fieldLabelClasses}>Critical role gaps</span>
+                            <ThemedSelect
+                              value={(slide.strength?.criticalRoleGaps ?? false) ? 'YES' : 'NO'}
+                              onChange={(value) => {
+                                const nextCritical = value === 'YES';
+                                updateExecutionSlide(slideIdx, {
+                                  strength: {
+                                    ...slide.strength,
+                                    criticalRoleGaps: nextCritical,
+                                    gapNotes: nextCritical ? slide.strength?.gapNotes ?? '' : '',
+                                  },
+                                });
+                              }}
+                              options={yesNoOptions}
+                              disabled={isViewMode}
+                              buttonClassName={cellSelectButtonClasses}
+                            />
+                          </div>
+                          {(slide.strength?.criticalRoleGaps ?? false) ? (
+                            <div className={fieldRowClasses}>
+                              <span className={fieldLabelClasses}>Gap notes</span>
+                              <input
+                                value={slide.strength?.gapNotes || ''}
+                                readOnly={isViewMode}
+                                onChange={(e) => updateExecutionSlide(slideIdx, { strength: { ...slide.strength, gapNotes: e.target.value } })}
+                                className={cellInputClasses}
+                                placeholder="e.g., Need 1 automation engineer"
+                              />
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <div className={sectionTitleClasses}>Bottlenecks (Top 3)</div>
+                        <ol className="space-y-3 list-decimal ml-5">
+                          {padArray(slide.bottlenecks || [], BOTTLENECK_ROWS, () => '').map((b, idx) => (
+                            <li key={idx}>
+                              <div className="flex items-center gap-3">
+                                <input
+                                  value={b}
+                                  readOnly={isViewMode}
+                                  onChange={(e) => {
+                                    const value = e.target.value;
+                                    const next = [...padArray(slide.bottlenecks || [], BOTTLENECK_ROWS, () => '')];
+                                    next[idx] = value;
+                                    updateExecutionSlide(slideIdx, { bottlenecks: next });
+                                  }}
+                                  className={cellInputClasses}
+                                  placeholder="e.g., Staging env instability"
+                                />
+                              </div>
+                            </li>
+                          ))}
+                        </ol>
+                      </div>
+
+                      <div className="space-y-3">
+                        <div className={sectionTitleClasses}>Decisions Pending (Top 3)</div>
+                        <ol className="space-y-4 list-decimal ml-5">
+                          {padArray(slide.decisions || [], DECISION_ROWS, () => ({ decisionText: '', ownerRole: OwnerRole.QA, dueDate: '' })).map((d, idx) => (
+                            <li key={idx}>
+                              <div className="flex items-center gap-3">
+                                <input
+                                  value={d.decisionText}
+                                  readOnly={isViewMode}
+                                  onChange={(e) => {
+                                    const value = e.target.value;
+                                    const next = [...padArray(slide.decisions || [], DECISION_ROWS, () => ({ decisionText: '', ownerRole: OwnerRole.QA, dueDate: '' }))];
+                                    next[idx] = { ...next[idx], decisionText: value };
+                                    updateExecutionSlide(slideIdx, { decisions: next });
+                                  }}
+                                  className={cellInputClasses}
+                                  placeholder="e.g., Approve extra test devices"
+                                />
+                              </div>
+                            </li>
+                          ))}
+                        </ol>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-8">
                   <div className="space-y-3">
-                    <div className={fieldRowClasses}>
-                      <span className={fieldLabelClasses}>Last discussion</span>
-                      <input
-                        value={formData.uedHealth?.lastDiscussion || ''}
-                        onChange={(e) => setFormData(prev => ({ ...prev, uedHealth: { ...(prev.uedHealth as any), lastDiscussion: e.target.value } }))}
-                        className={cellInputClasses}
-                        placeholder="e.g., 2026-02-07"
-                      />
-                    </div>
-                    <div className={fieldRowClasses}>
-                      <span className={fieldLabelClasses}>Days since last</span>
-                      <input
-                        value={formData.uedHealth?.daysSinceLast || ''}
-                        onChange={(e) => setFormData(prev => ({ ...prev, uedHealth: { ...(prev.uedHealth as any), daysSinceLast: e.target.value } }))}
-                        className={cellInputClasses}
-                        placeholder="e.g., 3"
-                      />
-                    </div>
-                    <div className={fieldRowClasses}>
-                      <span className={fieldLabelClasses}>Next scheduled</span>
-                      <input
-                        value={formData.uedHealth?.nextScheduled || ''}
-                        onChange={(e) => setFormData(prev => ({ ...prev, uedHealth: { ...(prev.uedHealth as any), nextScheduled: e.target.value } }))}
-                        className={cellInputClasses}
-                        placeholder="e.g., 2026-02-20"
-                      />
-                    </div>
-                    <div className={fieldRowClasses}>
-                      <span className={fieldLabelClasses}>Data available</span>
-                      <ThemedSelect
-                        value={(formData.uedHealth?.dataAvailable ?? false) ? 'YES' : 'NO'}
-                        onChange={(value) => setFormData(prev => ({ ...prev, uedHealth: { ...(prev.uedHealth as any), dataAvailable: value === 'YES' } }))}
-                        options={yesNoOptions}
-                        buttonClassName={cellSelectButtonClasses}
-                      />
-                    </div>
-                    <div className={fieldRowClasses}>
-                      <span className={fieldLabelClasses}>Status</span>
-                      <ThemedSelect
-                        value={(formData.uedHealth?.status as any) || 'NA'}
-                        onChange={(value) => setFormData(prev => ({ ...prev, uedHealth: { ...(prev.uedHealth as any), status: value as any } }))}
-                        options={healthWithNAOptions}
-                        buttonClassName={cellSelectButtonClasses}
-                        getOptionDotClassName={getHealthDotClassName}
-                      />
+                    <div className={sectionTitleClasses}>Sprint Health</div>
+                    <div className="space-y-3">
+                      <div className={fieldRowClasses}>
+                        <span className={fieldLabelClasses}>Sprint start date</span>
+                        <DatePicker
+                          showIcon
+                          icon={
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                              <path
+                                d="M8 3v2M16 3v2M4 8h16M6 5h12a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
+                          }
+                          selected={formData.sprintHealth?.startDate ? parseISODateToLocal(formData.sprintHealth.startDate) : null}
+                          disabled={isViewMode}
+                          onChange={(date: Date | null) =>
+                            setFormData(prev => {
+                              const next = date ? formatLocalISODate(new Date(date.getFullYear(), date.getMonth(), date.getDate())) : '';
+                              return { ...prev, sprintHealth: { ...(prev.sprintHealth as any), startDate: next } };
+                            })
+                          }
+                          placeholderText="dd-mm-yyyy"
+                          className={cellInputClasses}
+                          dateFormat="dd-MM-yyyy"
+                          calendarClassName="rounded-xl border border-slate-200 shadow-lg"
+                          popperClassName="z-50"
+                          wrapperClassName="w-full"
+                        />
+                      </div>
+                      <div className={fieldRowClasses}>
+                        <span className={fieldLabelClasses}>Sprint goal clarity</span>
+                        <ThemedSelect
+                          value={(formData.sprintHealth?.goalClarity as any) || 'NA'}
+                          onChange={(value) => setFormData(prev => ({ ...prev, sprintHealth: { ...(prev.sprintHealth as any), goalClarity: value as any } }))}
+                          options={healthWithNAOptions}
+                          disabled={isViewMode}
+                          buttonClassName={cellSelectButtonClasses}
+                          getOptionDotClassName={getHealthDotClassName}
+                        />
+                      </div>
+                      <div className={fieldRowClasses}>
+                        <span className={fieldLabelClasses}>Sprint readiness</span>
+                        <ThemedSelect
+                          value={(formData.sprintHealth?.readiness as any) || 'NA'}
+                          onChange={(value) => setFormData(prev => ({ ...prev, sprintHealth: { ...(prev.sprintHealth as any), readiness: value as any } }))}
+                          options={healthWithNAOptions}
+                          disabled={isViewMode}
+                          buttonClassName={cellSelectButtonClasses}
+                          getOptionDotClassName={getHealthDotClassName}
+                        />
+                      </div>
                     </div>
                   </div>
-                </div>
-              </div>
 
+                  <div className="space-y-3">
+                    <div className={sectionTitleClasses}>Team Health (Capacity)</div>
+                    <div className="space-y-3">
+                      <div className={fieldRowClasses}>
+                        <span className={fieldLabelClasses}>Planned team hours</span>
+                        <input
+                          type="number"
+                          value={formData.capacity?.plannedHours ?? 0}
+                          readOnly={isViewMode}
+                          onChange={(e) => updateCapacity({ plannedHours: Number(e.target.value) })}
+                          className={cellInputClasses}
+                        />
+                      </div>
+                      <div className={fieldRowClasses}>
+                        <span className={fieldLabelClasses}>Committed team hours</span>
+                        <input
+                          type="number"
+                          value={formData.capacity?.committedHours ?? 0}
+                          readOnly={isViewMode}
+                          onChange={(e) => updateCapacity({ committedHours: Number(e.target.value) })}
+                          className={cellInputClasses}
+                        />
+                      </div>
+                      <div className={fieldRowClasses}>
+                        <span className={fieldLabelClasses}>Surplus/Deficit (hrs)</span>
+                        <input
+                          value={formData.capacity?.surplusDeficitHours ?? 0}
+                          readOnly
+                          className={`${cellInputClasses} bg-slate-50 text-slate-600`}
+                        />
+                      </div>
+                      <div className={fieldRowClasses}>
+                        <span className={fieldLabelClasses}>Load status</span>
+                        <ThemedSelect
+                          value={formData.capacity?.loadStatus ?? LoadStatus.NORMAL}
+                          onChange={(value) => updateCapacity({ loadStatus: value as LoadStatus })}
+                          options={loadStatusOptions}
+                          disabled={isViewMode}
+                          buttonClassName={cellSelectButtonClasses}
+                          getOptionDotClassName={getLoadStatusDotClassName}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className={sectionTitleClasses}>Team Strength</div>
+                    <div className="space-y-3">
+                      <div className={fieldRowClasses}>
+                        <span className={fieldLabelClasses}>Active contributors</span>
+                        <input
+                          value={formData.strength?.activeContributorNames || ''}
+                          readOnly={isViewMode}
+                          onChange={(e) => setFormData(prev => ({ ...prev, strength: { ...(prev.strength as any), activeContributorNames: e.target.value } }))}
+                          className={cellInputClasses}
+                          placeholder="e.g., Rahul, Priya"
+                        />
+                      </div>
+                      <div className={fieldRowClasses}>
+                        <span className={fieldLabelClasses}>Critical role gaps</span>
+                        <ThemedSelect
+                          value={(formData.strength?.criticalRoleGaps ?? false) ? 'YES' : 'NO'}
+                          onChange={(value) =>
+                            setFormData(prev => {
+                              const nextCritical = value === 'YES';
+                              return {
+                                ...prev,
+                                strength: {
+                                  ...(prev.strength as any),
+                                  criticalRoleGaps: nextCritical,
+                                  gapNotes: nextCritical ? (prev.strength as any)?.gapNotes ?? '' : '',
+                                },
+                              };
+                            })
+                          }
+                          options={yesNoOptions}
+                          disabled={isViewMode}
+                          buttonClassName={cellSelectButtonClasses}
+                        />
+                      </div>
+                      {(formData.strength?.criticalRoleGaps ?? false) ? (
+                        <div className={fieldRowClasses}>
+                          <span className={fieldLabelClasses}>Gap notes</span>
+                          <input
+                            value={formData.strength?.gapNotes || ''}
+                            readOnly={isViewMode}
+                            onChange={(e) => setFormData(prev => ({ ...prev, strength: { ...(prev.strength as any), gapNotes: e.target.value } }))}
+                            className={cellInputClasses}
+                            placeholder="e.g., Need 1 automation engineer"
+                          />
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+
+                </div>
+              )}
+
+              {!isOverallMode && (
               <div className="space-y-8">
                 <div className="space-y-3">
                   <div className="flex items-center justify-between gap-3">
                     <div className={sectionTitleClasses}>Bottlenecks (Top 3)</div>
-                    <button
-                      type="button"
-                      onClick={addBottleneckRow}
-                      className={actionButtonClasses}
-                    >
-                      Add row
-                    </button>
+                    {!isViewMode && (
+                      <button
+                        type="button"
+                        onClick={addBottleneckRow}
+                        className={actionButtonClasses}
+                      >
+                        Add row
+                      </button>
+                    )}
                   </div>
                   <ol className="space-y-3 list-decimal ml-5">
                     {(formData.bottlenecks || []).map((b, idx) => (
@@ -899,6 +1390,7 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
                         <div className="flex items-center gap-3">
                           <input
                             value={b}
+                            readOnly={isViewMode}
                             onChange={(e) => {
                               const value = e.target.value;
                               setFormData(prev => {
@@ -910,7 +1402,7 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
                             className={cellInputClasses}
                             placeholder="e.g., Staging env instability"
                           />
-                          {idx >= BOTTLENECK_ROWS && (formData.bottlenecks || []).length > BOTTLENECK_ROWS && (
+                          {!isViewMode && idx >= BOTTLENECK_ROWS && (formData.bottlenecks || []).length > BOTTLENECK_ROWS && (
                             <button
                               type="button"
                               onClick={() => removeBottleneckRow(idx)}
@@ -928,13 +1420,15 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
                 <div className="space-y-3">
                   <div className="flex items-center justify-between gap-3">
                     <div className={sectionTitleClasses}>Decisions Pending (Top 3)</div>
-                    <button
-                      type="button"
-                      onClick={addDecisionRow}
-                      className={actionButtonClasses}
-                    >
-                      Add row
-                    </button>
+                    {!isViewMode && (
+                      <button
+                        type="button"
+                        onClick={addDecisionRow}
+                        className={actionButtonClasses}
+                      >
+                        Add row
+                      </button>
+                    )}
                   </div>
                   <ol className="space-y-4 list-decimal ml-5">
                     {(formData.decisions || []).map((d, idx) => (
@@ -942,6 +1436,7 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
                         <div className="flex items-center gap-3">
                           <input
                             value={d.decisionText}
+                            readOnly={isViewMode}
                             onChange={(e) => {
                               const value = e.target.value;
                               setFormData(prev => {
@@ -953,7 +1448,7 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
                             className={cellInputClasses}
                             placeholder="e.g., Approve extra test devices"
                           />
-                          {idx >= DECISION_ROWS && (formData.decisions || []).length > DECISION_ROWS ? (
+                          {!isViewMode && idx >= DECISION_ROWS && (formData.decisions || []).length > DECISION_ROWS ? (
                             <button
                               type="button"
                               onClick={() => removeDecisionRow(idx)}
@@ -968,20 +1463,23 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
                   </ol>
                 </div>
               </div>
+              )}
             </div>
           </div>
         </div>
 
         <div className="bg-white border border-slate-200 rounded-[20px] shadow-sm overflow-hidden">
-          <div className="px-6 py-4 bg-gradient-to-r from-[#073D44] to-[#407B7E] flex items-center justify-between">
+          <div className="px-6 py-4 bg-[#CFE8E8] border-b border-[#073D44]/15 flex items-center justify-between">
             <div className={pageTitleOnColorClasses}>Top Team Threads (Cognitive Load)</div>
-            <button
-              type="button"
-              onClick={addThreadRow}
-              className={headerActionButtonClasses}
-            >
-              Add row
-            </button>
+            {!isViewMode && (
+              <button
+                type="button"
+                onClick={addThreadRow}
+                className={headerActionButtonClasses}
+              >
+                Add row
+              </button>
+            )}
           </div>
           <div className="p-6">
             <div className="overflow-x-auto">
@@ -1001,6 +1499,7 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
                       <td className="px-3 py-3">
                         <input
                           value={t.product || ''}
+                          readOnly={isViewMode}
                           onChange={(e) => {
                             const value = e.target.value;
                             setFormData(prev => {
@@ -1016,6 +1515,7 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
                       <td className="px-3 py-3">
                         <input
                           value={t.thread}
+                          readOnly={isViewMode}
                           onChange={(e) => {
                             const value = e.target.value;
                             setFormData(prev => {
@@ -1040,6 +1540,7 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
                           }}
                           options={ownerOptions}
                           placeholder="Select owner"
+                          disabled={isViewMode}
                           buttonClassName={cellSelectButtonClasses}
                         />
                       </td>
@@ -1054,12 +1555,13 @@ const EditorView: React.FC<EditorProps> = ({ onSave, user, projects, users, repo
                             });
                           }}
                           options={threadStatusOptions}
+                          disabled={isViewMode}
                           buttonClassName={cellSelectButtonClasses}
                           getOptionDotClassName={getThreadStatusDotClassName}
                         />
                       </td>
                       <td className="px-3 py-3 text-right">
-                        {idx >= THREAD_ROWS && (formData.threads || []).length > THREAD_ROWS && (
+                        {!isViewMode && idx >= THREAD_ROWS && (formData.threads || []).length > THREAD_ROWS && (
                           <button
                             type="button"
                             onClick={() => removeThreadRow(idx)}

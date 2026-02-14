@@ -49,6 +49,41 @@ const App: React.FC = () => {
     }
   }, []);
 
+  const getAuthToken = () => {
+    const saved = localStorage.getItem('qapulse_auth');
+    if (!saved) return null;
+    try {
+      const parsed = JSON.parse(saved);
+      return typeof parsed?.token === 'string' ? parsed.token : null;
+    } catch {
+      return null;
+    }
+  };
+
+  useEffect(() => {
+    if (!currentUser) return;
+    const token = getAuthToken();
+    if (!token) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/reports', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) return;
+        if (!cancelled && Array.isArray(data.reports)) {
+          setReports(data.reports);
+        }
+      } catch {}
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.id]);
+
   const parseHashRoute = () => {
     const raw = window.location.hash || '';
     const cleaned = raw.startsWith('#') ? raw.slice(1) : raw;
@@ -208,6 +243,33 @@ const App: React.FC = () => {
 
   const handleAddReport = (newReport: WeeklyReport) => {
     setReports(prev => [newReport, ...prev.filter(r => r.id !== newReport.id)]);
+
+    const token = getAuthToken();
+    if (!token) return;
+    (async () => {
+      try {
+        const res = await fetch('/api/reports', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(newReport),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data?.report) {
+          const listRes = await fetch('/api/reports', {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const listData = await listRes.json().catch(() => ({}));
+          if (listRes.ok && Array.isArray(listData.reports)) {
+            setReports(listData.reports);
+          }
+          return;
+        }
+        setReports(prev => [data.report, ...prev.filter(r => r.id !== data.report.id)]);
+      } catch {}
+    })();
   };
 
   const handleDeleteReport = (id: string) => {
@@ -705,7 +767,7 @@ const App: React.FC = () => {
       <Layout user={currentUser} logout={() => { setCurrentUser(null); localStorage.removeItem('qapulse_auth'); setIsSignup(false); setEmail(''); setName(''); setPassword(''); setError(''); }}>
         <Routes>
           <Route path="/" element={<DashboardView reports={reports} projects={projects} user={currentUser} users={users} />} />
-          <Route path="/weekly-reports" element={<WeeklyReportView reports={reports} projects={projects} user={currentUser} onUpdate={handleAddReport} />} />
+          <Route path="/weekly-reports" element={<WeeklyReportView reports={reports} projects={projects} user={currentUser} users={users} onUpdate={handleAddReport} onDelete={handleDeleteReport} />} />
           <Route path="/create" element={<EditorView onSave={handleAddReport} user={currentUser} projects={projects} users={users} />} />
           <Route path="/edit/:id" element={<EditorView onSave={handleAddReport} user={currentUser} projects={projects} users={users} reports={reports} />} />
           <Route path="/report/:id" element={<DetailView reports={reports} projects={projects} user={currentUser} users={users} onUpdate={handleAddReport} onDelete={handleDeleteReport} />} />

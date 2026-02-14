@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes, createHash } from 'crypto';
 import User from './models/User.js';
+import WeeklyReport from './models/WeeklyReport.js';
 
 const envLocalPath = path.resolve(process.cwd(), '.env.local');
 if (fs.existsSync(envLocalPath)) {
@@ -155,6 +156,7 @@ async function connectDB() {
   try {
     await mongoose.connect(MONGODB_URI, { dbName: MONGODB_DB });
     await User.init();
+    await WeeklyReport.init();
     dbReady = true;
     console.log('Connected to MongoDB Atlas and ensured indexes');
   } catch (err) {
@@ -178,6 +180,99 @@ function signToken(userId) {
 app.get('/api/health', (_req, res) => {
   const state = mongoose.connection.readyState;
   res.json({ status: 'ok', dbReady, mongoState: state, devMode: DEV_MODE });
+});
+
+function requireAuth(req, res, next) {
+  const auth = String(req.get('authorization') || '');
+  const match = auth.match(/^Bearer\s+(.+)$/i);
+  const token = match?.[1];
+  if (!token) return res.status(401).json({ error: 'Missing auth token' });
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    const userId = payload?.userId;
+    if (!userId) return res.status(401).json({ error: 'Invalid auth token' });
+    req.userId = userId;
+    return next();
+  } catch {
+    return res.status(401).json({ error: 'Invalid auth token' });
+  }
+}
+
+app.get('/api/reports', requireAuth, async (req, res) => {
+  try {
+    if (!dbReady) return res.status(503).json({ error: 'Database not ready' });
+    const items = await WeeklyReport.find({ createdBy: req.userId }).sort({ updatedAt: -1 }).lean();
+    const normalized = items.map(doc => {
+      const id = doc.reportId;
+      const createdAt = doc.createdAt instanceof Date ? doc.createdAt.toISOString() : doc.createdAt;
+      const updatedAt = doc.updatedAt instanceof Date ? doc.updatedAt.toISOString() : doc.updatedAt;
+      const { _id, __v, reportId, ...rest } = doc;
+      return { id, createdAt, updatedAt, ...rest };
+    });
+    return res.json({ reports: normalized });
+  } catch (err) {
+    console.error('List reports error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/reports', requireAuth, async (req, res) => {
+  try {
+    if (!dbReady) return res.status(503).json({ error: 'Database not ready' });
+    const report = req.body || {};
+    const reportId = String(report.id || '').trim();
+    if (!reportId) return res.status(400).json({ error: 'Report id is required' });
+
+    const otherOwner = await WeeklyReport.findOne({ reportId, createdBy: { $ne: req.userId } }).lean();
+    if (otherOwner) {
+      return res.status(403).json({ error: 'You do not have access to modify this report' });
+    }
+
+    const existing = await WeeklyReport.findOne({ reportId, createdBy: req.userId }).lean();
+    const createdBy = existing?.createdBy || req.userId;
+    const updatedBy = req.userId;
+    const nextStatus = String(report.status || existing?.status || 'DRAFT');
+    const publishedBy =
+      nextStatus === 'PUBLISHED' ? (existing?.publishedBy || req.userId) : undefined;
+
+    const next = {
+      reportId,
+      projectId: String(report.projectId || ''),
+      title: String(report.title || ''),
+      startDate: String(report.startDate || ''),
+      endDate: String(report.endDate || ''),
+      isoWeek: Number(report.isoWeek || 0),
+      year: Number(report.year || 0),
+      month: Number(report.month || 0),
+      weekOfMonth: Number(report.weekOfMonth || 0),
+      status: nextStatus,
+      revisionOf: report.revisionOf ? String(report.revisionOf) : undefined,
+
+      goals: Array.isArray(report.goals) ? report.goals : [],
+      capacity: report.capacity || {},
+      strength: report.strength || {},
+      decisions: Array.isArray(report.decisions) ? report.decisions : [],
+      sprintHealth: report.sprintHealth || {},
+      uedHealth: report.uedHealth || {},
+      bottlenecks: Array.isArray(report.bottlenecks) ? report.bottlenecks : [],
+      threads: Array.isArray(report.threads) ? report.threads : [],
+
+      createdBy,
+      updatedBy,
+      publishedBy,
+    };
+
+    const saved = await WeeklyReport.findOneAndUpdate(
+      { reportId, createdBy },
+      { $set: next },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    return res.json({ report: saved.toJSON() });
+  } catch (err) {
+    console.error('Save report error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 app.post('/api/auth/forgot-password', async (req, res) => {
