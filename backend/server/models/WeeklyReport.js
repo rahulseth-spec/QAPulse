@@ -96,4 +96,3 @@ WeeklyReportSchema.set('toJSON', {
 
 const WeeklyReport = mongoose.models.WeeklyReport || mongoose.model('WeeklyReport', WeeklyReportSchema);
 export default WeeklyReport;
-
