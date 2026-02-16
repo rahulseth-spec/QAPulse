@@ -47,9 +47,20 @@ export const Layout: React.FC<LayoutProps> = ({ user, logout, children }) => {
 
   const DocsIcon = (props: { className?: string }) => (
     <svg className={props.className} width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M6 4h10l2 2v14H6V4Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
-      <path d="M8.5 10H16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      <path d="M8.5 14H16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path
+        d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M9.5 9a2.5 2.5 0 0 1 5 0c0 2-2.5 2-2.5 4"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M12 17h.01" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
     </svg>
   );
 
