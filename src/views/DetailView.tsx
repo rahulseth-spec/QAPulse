@@ -29,6 +29,7 @@ const DetailView: React.FC<DetailProps> = ({ reports, projects, user, users, onU
     : [
         {
           projectId: report.projectId || '',
+          projectNameOverride: '',
           capacity: report.capacity,
           strength: report.strength,
           sprintHealth: report.sprintHealth,
@@ -41,6 +42,7 @@ const DetailView: React.FC<DetailProps> = ({ reports, projects, user, users, onU
     : [
         {
           projectId: report.projectId || '',
+          projectNameOverride: '',
           capacity: report.capacity,
           strength: report.strength,
           sprintHealth: report.sprintHealth,
@@ -240,9 +242,10 @@ const DetailView: React.FC<DetailProps> = ({ reports, projects, user, users, onU
 
     ensuredSlides.forEach((s) => {
       const slideProject = projects.find(p => p.id === s.projectId);
+      const slideTitleProjectName = s.projectNameOverride || slideProject?.name || 'Project';
       const slide2 = pptx.addSlide();
       slide2.background = { color: 'FFFFFF' };
-      slide2.addText(`${slideProject?.name || (isOverall ? 'All Projects' : 'Project')} Execution Readiness & Friction`, { x: 0.6, y: 0.3, w: 12.2, h: 0.6, fontFace: 'Calibri', fontSize: 20, bold: true, color: '0F172A' });
+      slide2.addText(`${slideTitleProjectName} Execution Readiness & Friction`, { x: 0.6, y: 0.3, w: 12.2, h: 0.6, fontFace: 'Calibri', fontSize: 20, bold: true, color: '0F172A' });
       const left = [
         `Sprint Health`,
         `• Sprint start date: ${s.sprintHealth?.startDate || 'N/A'}`,
@@ -389,7 +392,7 @@ const DetailView: React.FC<DetailProps> = ({ reports, projects, user, users, onU
 
         {executionSlidesToRender.map((s, slideIdx) => {
           const slideProject = projects.find(p => p.id === s.projectId);
-          const slideTitle = `${slideProject?.name || headerProjectName} Execution Readiness & Friction`;
+          const slideTitle = `${s.projectNameOverride || slideProject?.name || 'Project'} Execution Readiness & Friction`;
           return (
             <div key={`${s.projectId || 'overall'}-${slideIdx}`} className="bg-white border border-slate-200 rounded-[20px] shadow-sm overflow-hidden" style={{ breakAfter: 'page' }}>
               <div className="px-6 py-4 bg-[#CFE8E8] border-b border-[#073D44]/15">

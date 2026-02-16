@@ -37,18 +37,55 @@ const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({ reports, projects, 
   useEffect(() => {
     if (archiveMode === 'ALL') {
       setFilters(prev => (prev.projectId ? { ...prev, projectId: '' } : prev));
-      return;
     }
-    const firstProjectId = projects[0]?.id || '';
-    if (!firstProjectId) return;
-    setFilters(prev => (prev.projectId ? prev : { ...prev, projectId: firstProjectId }));
-  }, [archiveMode, projects]);
+  }, [archiveMode]);
 
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const menuRootRef = useRef<HTMLDivElement | null>(null);
   const menuDropdownRef = useRef<HTMLDivElement | null>(null);
   const menuAnchorRef = useRef<HTMLButtonElement | null>(null);
   const [menuPos, setMenuPos] = useState<{ left: number; top: number; direction: 'down' | 'up' } | null>(null);
+
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const importModeRef = useRef<'PROJECT' | 'OVERALL'>('PROJECT');
+
+  const triggerImport = (mode: 'PROJECT' | 'OVERALL') => {
+    importModeRef.current = mode;
+    importInputRef.current?.click();
+  };
+
+  const handleImportSelected = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const list = Array.from(files);
+    const pptx = list.find(f => /\.pptx$/i.test(f.name));
+    const ppt = list.find(f => /\.ppt$/i.test(f.name));
+    if (!pptx && ppt) {
+      window.alert('Old .ppt files are not supported. Please save/export as .pptx and upload again.');
+      if (importInputRef.current) importInputRef.current.value = '';
+      return;
+    }
+    if (!pptx) {
+      window.alert('Please upload a .pptx file.');
+      if (importInputRef.current) importInputRef.current.value = '';
+      return;
+    }
+
+    const mode = importModeRef.current;
+    const projectId = mode === 'PROJECT' ? (filters.projectId || projects[0]?.id || '') : '';
+    const params = new URLSearchParams({
+      ...(mode === 'PROJECT' && projectId ? { projectId } : {}),
+      ...(mode === 'OVERALL' ? { mode: 'overall' } : {}),
+      import: '1',
+    }).toString();
+
+    try {
+      const buf = await pptx.arrayBuffer();
+      (window as any).__QAPULSE_IMPORT__ = { buf, name: pptx.name };
+      navigate(`/create?${params}`);
+    } finally {
+      if (importInputRef.current) importInputRef.current.value = '';
+    }
+  };
 
   useEffect(() => {
     const onDocClick = (e: MouseEvent) => {
@@ -101,9 +138,7 @@ const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({ reports, projects, 
   const months = Array.from({ length: 12 }, (_, i) => ({ val: (i + 1).toString(), label: new Date(2000, i).toLocaleString('default', { month: 'long' }) }));
   const weeks = ['1', '2', '3', '4', '5'];
 
-  const filterProjectOptions: ThemedSelectOption[] = [
-    ...projects.map(p => ({ value: p.id, label: p.name })),
-  ];
+  const filterProjectOptions: ThemedSelectOption[] = [{ value: '', label: 'Any' }, ...projects.map(p => ({ value: p.id, label: p.name }))];
 
   const yearOptions: ThemedSelectOption[] = [{ value: '', label: 'Any' }, ...years.map(y => ({ value: y, label: y }))];
   const monthOptions: ThemedSelectOption[] = [{ value: '', label: 'Any' }, ...months.map(m => ({ value: m.val, label: m.label }))];
@@ -122,8 +157,15 @@ const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({ reports, projects, 
     return 'bg-slate-300';
   };
 
-  const getUserName = (id: string | undefined | null) =>
-    (id && users.find(u => u.id === id)?.name) || '—';
+  const findUserName = (id: string | undefined | null) => (id ? users.find(u => u.id === id)?.name : undefined);
+  const getUserName = (id: string | undefined | null) => findUserName(id) || '—';
+
+  const getPublishedByName = (report: WeeklyReport) => {
+    if (report.status === ReportStatus.PUBLISHED) {
+      return findUserName(report.publishedBy) || findUserName(report.updatedBy) || findUserName(report.createdBy) || '—';
+    }
+    return getUserName(report.createdBy);
+  };
 
   const filteredReports = reports.filter(r => {
     const matchesProject = archiveMode === 'ALL' ? true : (!filters.projectId || r.projectId === filters.projectId);
@@ -214,25 +256,85 @@ const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({ reports, projects, 
             <h1 className="text-[28px] leading-[36px] font-bold tracking-tight">Weekly Report</h1>
             <p className="mt-3 text-[15px] leading-[24px] text-white/80">Review historical submissions and export reports.</p>
           </div>
-          <div className="flex gap-3 shrink-0">
-            <button
-              type="button"
-              onClick={() => {
-                const projectId = filters.projectId || projects[0]?.id || '';
-                const params = new URLSearchParams(projectId ? { projectId } : {}).toString();
-                navigate(params ? `/create?${params}` : '/create');
-              }}
-              className="h-11 px-4 rounded-xl bg-white text-[#073D44] font-semibold text-[13px] hover:bg-white/90 transition-colors"
-            >
-              Create (Project wise)
-            </button>
-            <button
-              type="button"
-              onClick={() => navigate('/create?mode=overall')}
-              className="h-11 px-4 rounded-xl bg-white/10 text-white font-semibold text-[13px] border border-white/20 hover:bg-white/15 transition-colors"
-            >
-              Create (Overall)
-            </button>
+          <div className="flex gap-4 shrink-0">
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".ppt,.pptx"
+              multiple
+              className="hidden"
+              onChange={(e) => handleImportSelected(e.target.files)}
+            />
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const projectId = filters.projectId || projects[0]?.id || '';
+                  const params = new URLSearchParams(projectId ? { projectId } : {}).toString();
+                  navigate(params ? `/create?${params}` : '/create');
+                }}
+                className="h-11 px-4 rounded-xl bg-white text-[#073D44] font-semibold text-[13px] hover:bg-white/90 transition-colors"
+              >
+                Create (Project wise)
+              </button>
+              <button
+                type="button"
+                aria-label="Import (Project wise)"
+                onClick={() => triggerImport('PROJECT')}
+                className="h-11 px-4 rounded-xl bg-white/10 text-white font-semibold text-[13px] border border-white/20 hover:bg-white/15 transition-colors inline-flex items-center gap-2"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path
+                    d="M12 3v10m0 0 4-4m-4 4-4-4"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                Project wise
+              </button>
+            </div>
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => navigate('/create?mode=overall')}
+                className="h-11 px-4 rounded-xl bg-white/10 text-white font-semibold text-[13px] border border-white/20 hover:bg-white/15 transition-colors"
+              >
+                Create (All Projects)
+              </button>
+              <button
+                type="button"
+                aria-label="Import (All Projects)"
+                onClick={() => triggerImport('OVERALL')}
+                className="h-11 px-4 rounded-xl bg-white/10 text-white font-semibold text-[13px] border border-white/20 hover:bg-white/15 transition-colors inline-flex items-center gap-2"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path
+                    d="M12 3v10m0 0 4-4m-4 4-4-4"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                All projects
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -268,7 +370,7 @@ const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({ reports, projects, 
               type="button"
               onClick={() => {
                 setFilters(prev => ({
-                  projectId: archiveMode === 'ALL' ? '' : (prev.projectId || projects[0]?.id || ''),
+                  projectId: '',
                   year: '',
                   month: '',
                   weekOfMonth: '',
@@ -290,7 +392,7 @@ const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({ reports, projects, 
                 value={filters.projectId}
                 onChange={(projectId) => setFilters({ ...filters, projectId })}
                 options={filterProjectOptions}
-                placeholder="Select"
+                placeholder="Any"
               />
             </div>
           )}
@@ -356,7 +458,7 @@ const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({ reports, projects, 
                       </td>
                       <td className="px-4 py-3 border-b border-slate-100">
                         <span className="text-[13px] font-semibold text-slate-900 block max-w-[320px] truncate">
-                          {getUserName(r.publishedBy)}
+                          {getPublishedByName(r)}
                         </span>
                       </td>
                       <td className="px-4 py-3 border-b border-slate-100 text-[13px] text-slate-700">

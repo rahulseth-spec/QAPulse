@@ -73,6 +73,7 @@ export type WeeklyReportScope = 'PROJECT' | 'OVERALL';
 
 export interface ExecutionReadinessSlide {
   projectId: string;
+  projectNameOverride?: string;
   capacity: {
     plannedHours: number;
     committedHours: number;

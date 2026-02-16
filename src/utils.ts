@@ -37,6 +37,19 @@ export function formatLocalISODate(date: Date): string {
 }
 
 export function parseISODateToLocal(isoDate: string): Date {
-  const [y, m, d] = (isoDate || '').split('-').map(Number);
-  return new Date(y, (m || 1) - 1, d || 1);
+  const raw = (isoDate || '').trim();
+  if (!raw) return new Date();
+
+  const datePart = raw.includes('T') ? raw.split('T')[0] : raw;
+  const [y, m, d] = datePart.split('-').map(Number);
+  if (Number.isFinite(y) && Number.isFinite(m) && Number.isFinite(d)) {
+    return new Date(y, m - 1, d);
+  }
+
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) {
+    return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+  }
+
+  return new Date();
 }
