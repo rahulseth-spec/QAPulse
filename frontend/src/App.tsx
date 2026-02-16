@@ -37,6 +37,21 @@ class ErrorBoundary extends Component<
   }
 }
 
+const API_BASE = (() => {
+  try {
+    const base = (import.meta as any)?.env?.VITE_API_BASE_URL;
+    return typeof base === 'string' ? base.trim().replace(/\/+$/, '') : '';
+  } catch {
+    return '';
+  }
+})();
+
+const apiUrl = (path: string) => {
+  if (!API_BASE) return path;
+  if (path.startsWith('/')) return `${API_BASE}${path}`;
+  return `${API_BASE}/${path}`;
+};
+
 const App: React.FC = () => {
   const [users, setUsers] = useState<User[]>(MOCK_USERS);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -117,7 +132,7 @@ const App: React.FC = () => {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/reports', {
+        const res = await fetch(apiUrl('/api/reports'), {
           headers: { Authorization: `Bearer ${token}` },
         });
         const data = await res.json().catch(() => ({}));
@@ -219,7 +234,7 @@ const App: React.FC = () => {
     if (!validateLogin()) return;
     try {
       setIsLoading(true);
-      const res = await fetch('/api/auth/login', {
+      const res = await fetch(apiUrl('/api/auth/login'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim(), password }),
@@ -263,7 +278,7 @@ const App: React.FC = () => {
         password,
         projects: projects.map(p => p.id),
       };
-      const res = await fetch('/api/auth/signup', {
+      const res = await fetch(apiUrl('/api/auth/signup'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -297,7 +312,7 @@ const App: React.FC = () => {
     if (!token) return;
     (async () => {
       try {
-        const res = await fetch('/api/reports', {
+        const res = await fetch(apiUrl('/api/reports'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -307,7 +322,7 @@ const App: React.FC = () => {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok || !data?.report) {
-          const listRes = await fetch('/api/reports', {
+          const listRes = await fetch(apiUrl('/api/reports'), {
             headers: { Authorization: `Bearer ${token}` },
           });
           const listData = await listRes.json().catch(() => ({}));
@@ -338,7 +353,7 @@ const App: React.FC = () => {
     }
     try {
       setIsLoading(true);
-      const res = await fetch('/api/auth/forgot-password', {
+      const res = await fetch(apiUrl('/api/auth/forgot-password'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: target }),
@@ -379,7 +394,7 @@ const App: React.FC = () => {
     }
     try {
       setIsLoading(true);
-      const res = await fetch('/api/auth/reset-password', {
+      const res = await fetch(apiUrl('/api/auth/reset-password'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token, password: resetPassword }),
@@ -694,7 +709,7 @@ const App: React.FC = () => {
                     setError('');
                     setOauthBusy(true);
                     try {
-                      const res = await fetch('/api/auth/google/status');
+                      const res = await fetch(apiUrl('/api/auth/google/status'));
                       const data = await res.json();
                       if (!res.ok || !data?.enabled) {
                         const missing = Array.isArray(data?.missing) ? data.missing.join(', ') : '';
@@ -702,7 +717,7 @@ const App: React.FC = () => {
                         setOauthBusy(false);
                         return;
                       }
-                      window.location.assign('/api/auth/google');
+                      window.location.assign(apiUrl('/api/auth/google'));
                     } catch {
                       setError('Network error. Ensure the API server is running.');
                       setOauthBusy(false);
