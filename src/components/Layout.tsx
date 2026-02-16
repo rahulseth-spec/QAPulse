@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { User } from '../types';
 
 interface LayoutProps {
@@ -10,6 +10,7 @@ interface LayoutProps {
 
 export const Layout: React.FC<LayoutProps> = ({ user, logout, children }) => {
   const location = useLocation();
+  const navigate = useNavigate();
 
   const [isSidebarCollapsed, setIsSidebarCollapsed] = React.useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
@@ -46,9 +47,20 @@ export const Layout: React.FC<LayoutProps> = ({ user, logout, children }) => {
 
   const DocsIcon = (props: { className?: string }) => (
     <svg className={props.className} width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M6 4h10l2 2v14H6V4Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
-      <path d="M8.5 10H16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      <path d="M8.5 14H16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path
+        d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M9.5 9a2.5 2.5 0 0 1 5 0c0 2-2.5 2-2.5 4"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M12 17h.01" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
     </svg>
   );
 
@@ -68,28 +80,37 @@ export const Layout: React.FC<LayoutProps> = ({ user, logout, children }) => {
     </svg>
   );
 
+  const BackIcon = (props: { className?: string }) => (
+    <svg className={props.className} width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M15 18l-6-6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+
   const navItems = [
     { label: 'Dashboard', path: '/', icon: DashboardIcon },
     { label: 'Weekly Report', path: '/weekly-reports', icon: ReportIcon },
-    { label: 'System Docs', path: '/docs', icon: DocsIcon },
+    { label: 'FAQ', path: '/docs', icon: DocsIcon },
   ];
+
+  const isReportView = location.pathname.startsWith('/report/');
+  const headerTitle = isReportView ? 'Weekly Report' : (navItems.find(i => i.path === location.pathname)?.label || 'System View');
 
   return (
     <div className="flex h-screen overflow-hidden bg-[#F6F7F8]">
-      <aside className={`${isSidebarCollapsed ? 'w-[88px]' : 'w-[280px]'} bg-white text-slate-700 flex flex-col shrink-0 border-r border-slate-200 transition-[width] duration-200`}>
-        <div className={`${isSidebarCollapsed ? 'px-4' : 'px-6'} pt-7 pb-6 border-b border-slate-200`}>
+      <aside className={`${isSidebarCollapsed ? 'w-[88px]' : 'w-[280px]'} bg-gradient-to-b from-[#073D44] to-[#407B7E] text-white flex flex-col shrink-0 border-r border-[#073D44] transition-[width] duration-200`}>
+        <div className={`${isSidebarCollapsed ? 'px-4' : 'px-6'} pt-7 pb-6 border-b border-white/15`}>
           <div className={isSidebarCollapsed ? 'flex flex-col items-center gap-3' : 'flex items-center justify-between gap-3'}>
             <div className={isSidebarCollapsed ? 'flex flex-col items-center gap-3' : 'flex items-center gap-3 min-w-0'}>
-              <div className="w-9 h-9 bg-[#073D44] rounded-xl flex items-center justify-center text-white shadow-sm shrink-0">
-                <PulseIcon />
+              <div className="w-9 h-9 bg-white rounded-xl flex items-center justify-center text-[#073D44] shadow-sm shrink-0">
+                <PulseIcon className="text-[#073D44]" />
               </div>
               {!isSidebarCollapsed && (
                 <div className="leading-tight min-w-0">
-                  <div className="text-[15px] font-semibold text-slate-900 tracking-tight">
+                  <div className="text-[15px] font-semibold text-white tracking-tight">
                     <span className="font-extrabold">QA</span>
                     <span className="font-semibold">Pulse</span>
                   </div>
-                  <div className="text-[11px] text-slate-500">by <span className="font-bold text-slate-600">ConveGenius</span></div>
+                  <div className="text-[11px] text-white/70">by <span className="font-bold text-white">ConveGenius</span></div>
                 </div>
               )}
             </div>
@@ -98,7 +119,7 @@ export const Layout: React.FC<LayoutProps> = ({ user, logout, children }) => {
               type="button"
               aria-label={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
               onClick={() => setIsSidebarCollapsed(v => !v)}
-              className="w-9 h-9 rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-colors flex items-center justify-center shrink-0"
+              className="w-9 h-9 rounded-xl border border-white/20 bg-white/10 text-white hover:bg-white/15 transition-colors flex items-center justify-center shrink-0"
             >
               <MenuIcon />
             </button>
@@ -112,47 +133,57 @@ export const Layout: React.FC<LayoutProps> = ({ user, logout, children }) => {
               to={item.path}
               className={`flex items-center ${isSidebarCollapsed ? 'justify-center px-3' : 'gap-3 px-4'} py-3 rounded-xl transition-colors ${
                 location.pathname === item.path 
-                  ? 'bg-[#073D44] text-white' 
-                  : 'hover:bg-slate-50 text-slate-700'
+                  ? 'bg-white text-[#073D44]' 
+                  : 'hover:bg-white/10 text-white/90'
               }`}
             >
-              <item.icon className={location.pathname === item.path ? 'text-white' : 'text-slate-500'} />
+              <item.icon className={location.pathname === item.path ? 'text-[#073D44]' : 'text-white/70'} />
               {!isSidebarCollapsed && (
-                <span className={`font-semibold text-[14px] ${location.pathname === item.path ? 'text-white' : 'text-slate-700'}`}>{item.label}</span>
+                <span className={`font-semibold text-[14px] ${location.pathname === item.path ? 'text-[#073D44]' : 'text-white'}`}>{item.label}</span>
               )}
             </Link>
           ))}
         </nav>
 
-        <div className="p-4 border-t border-slate-200">
+        <div className="p-4 border-t border-white/15">
           {!isSidebarCollapsed && (
             <div className="mb-4 px-4">
-              <div className="text-[10px] text-slate-400 uppercase font-extrabold tracking-[0.16em] mb-1">Session</div>
-              <div className="font-semibold text-slate-900 text-sm truncate">{user.name}</div>
-              <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+              <div className="text-[10px] text-white/60 uppercase font-extrabold tracking-[0.16em] mb-1">Session</div>
+              <div className="font-semibold text-white text-sm truncate">{user.name}</div>
+              <div className="text-[11px] text-white/70 mt-0.5 truncate">
                 {user.email}
               </div>
             </div>
           )}
           <button
             onClick={logout}
-            className={`${isSidebarCollapsed ? 'justify-center px-3' : 'text-left px-4'} w-full py-2.5 hover:bg-red-500/10 hover:text-red-600 transition-colors rounded-xl flex items-center gap-2 text-sm font-semibold text-slate-700`}
+            className={`${isSidebarCollapsed ? 'justify-center px-3' : 'text-left px-4'} w-full py-2.5 hover:bg-red-500/20 hover:text-white transition-colors rounded-xl flex items-center gap-2 text-sm font-semibold text-white`}
           >
-            <SignOutIcon className="text-slate-500" />
+            <SignOutIcon className="text-white/70" />
             {!isSidebarCollapsed && 'Sign Out'}
           </button>
         </div>
       </aside>
 
       <main className="flex-1 flex flex-col overflow-hidden relative">
-        <header className="h-16 bg-white/90 backdrop-blur border-b border-slate-200 flex items-center justify-between px-6 lg:px-12 sticky top-0 z-10 shrink-0">
+        <header className="h-16 bg-[#CFE8E8]/95 backdrop-blur border-b border-[#073D44]/20 flex items-center justify-between px-6 lg:px-12 sticky top-0 z-10 shrink-0">
           <div className="flex items-center gap-4">
-            <h2 className="text-[14px] font-semibold text-slate-700 tracking-tight">
-              {navItems.find(i => i.path === location.pathname)?.label || 'System View'}
+            {isReportView && (
+              <button
+                type="button"
+                aria-label="Back"
+                onClick={() => navigate(-1)}
+                className="w-9 h-9 rounded-xl bg-white/65 border border-[#073D44]/25 text-[#073D44] hover:bg-white/80 transition-colors flex items-center justify-center"
+              >
+                <BackIcon />
+              </button>
+            )}
+            <h2 className="text-[14px] font-semibold text-[#073D44] tracking-tight">
+              {headerTitle}
             </h2>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-[10px] font-extrabold text-slate-500 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg uppercase tracking-widest">
+            <span className="text-[10px] font-extrabold text-[#073D44] bg-white/65 border border-[#073D44]/25 px-2.5 py-1 rounded-lg uppercase tracking-widest">
               Build v1.2.0
             </span>
           </div>

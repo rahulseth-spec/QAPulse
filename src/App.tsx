@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Component } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
 import { User, WeeklyReport, Project } from './types';
 import { MOCK_USERS, MOCK_PROJECTS, MOCK_REPORTS } from './constants';
@@ -9,11 +9,40 @@ import DocumentationView from './views/DocumentationView';
 import WeeklyReportView from './views/WeeklyReportView';
 import { Layout } from './components/Layout';
 
+type RuntimeErrorState = {
+  message: string;
+  stack?: string;
+  source?: 'render' | 'error' | 'promise';
+};
+
+class ErrorBoundary extends Component<
+  { onError: (err: RuntimeErrorState) => void; children: React.ReactNode },
+  { hasError: boolean }
+> {
+  declare props: { onError: (err: RuntimeErrorState) => void; children: React.ReactNode };
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: any) {
+    const message = typeof error?.message === 'string' ? error.message : String(error);
+    const stack = typeof error?.stack === 'string' ? error.stack : undefined;
+    this.props.onError({ message, stack, source: 'render' });
+  }
+
+  render() {
+    return this.props.children;
+  }
+}
+
 const App: React.FC = () => {
   const [users, setUsers] = useState<User[]>(MOCK_USERS);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [reports, setReports] = useState<WeeklyReport[]>(MOCK_REPORTS);
   const [projects] = useState<Project[]>(MOCK_PROJECTS);
+  const [runtimeError, setRuntimeError] = useState<RuntimeErrorState | null>(null);
   
   const [isSignup, setIsSignup] = useState(false);
   const [email, setEmail] = useState('');
@@ -48,6 +77,61 @@ const App: React.FC = () => {
       } catch {}
     }
   }, []);
+
+  useEffect(() => {
+    const onErr = (e: ErrorEvent) => {
+      const message = e.error?.message || e.message || 'Unknown error';
+      const stack = e.error?.stack;
+      setRuntimeError({ message, stack, source: 'error' });
+    };
+    const onRejection = (e: PromiseRejectionEvent) => {
+      const reason: any = e.reason;
+      const message = reason?.message || String(reason || 'Unhandled promise rejection');
+      const stack = reason?.stack;
+      setRuntimeError({ message, stack, source: 'promise' });
+    };
+    window.addEventListener('error', onErr);
+    window.addEventListener('unhandledrejection', onRejection);
+    return () => {
+      window.removeEventListener('error', onErr);
+      window.removeEventListener('unhandledrejection', onRejection);
+    };
+  }, []);
+
+  const getAuthToken = () => {
+    const saved = localStorage.getItem('qapulse_auth');
+    if (!saved) return null;
+    try {
+      const parsed = JSON.parse(saved);
+      return typeof parsed?.token === 'string' ? parsed.token : null;
+    } catch {
+      return null;
+    }
+  };
+
+  useEffect(() => {
+    if (!currentUser) return;
+    const token = getAuthToken();
+    if (!token) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/reports', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) return;
+        if (!cancelled && Array.isArray(data.reports)) {
+          setReports(data.reports);
+        }
+      } catch {}
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.id]);
 
   const parseHashRoute = () => {
     const raw = window.location.hash || '';
@@ -208,6 +292,33 @@ const App: React.FC = () => {
 
   const handleAddReport = (newReport: WeeklyReport) => {
     setReports(prev => [newReport, ...prev.filter(r => r.id !== newReport.id)]);
+
+    const token = getAuthToken();
+    if (!token) return;
+    (async () => {
+      try {
+        const res = await fetch('/api/reports', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(newReport),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data?.report) {
+          const listRes = await fetch('/api/reports', {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const listData = await listRes.json().catch(() => ({}));
+          if (listRes.ok && Array.isArray(listData.reports)) {
+            setReports(listData.reports);
+          }
+          return;
+        }
+        setReports(prev => [data.report, ...prev.filter(r => r.id !== data.report.id)]);
+      } catch {}
+    })();
   };
 
   const handleDeleteReport = (id: string) => {
@@ -703,15 +814,58 @@ const App: React.FC = () => {
   return (
     <Router>
       <Layout user={currentUser} logout={() => { setCurrentUser(null); localStorage.removeItem('qapulse_auth'); setIsSignup(false); setEmail(''); setName(''); setPassword(''); setError(''); }}>
-        <Routes>
-          <Route path="/" element={<DashboardView reports={reports} projects={projects} user={currentUser} users={users} />} />
-          <Route path="/weekly-reports" element={<WeeklyReportView reports={reports} projects={projects} user={currentUser} onUpdate={handleAddReport} />} />
-          <Route path="/create" element={<EditorView onSave={handleAddReport} user={currentUser} projects={projects} users={users} />} />
-          <Route path="/edit/:id" element={<EditorView onSave={handleAddReport} user={currentUser} projects={projects} users={users} reports={reports} />} />
-          <Route path="/report/:id" element={<DetailView reports={reports} projects={projects} user={currentUser} users={users} onUpdate={handleAddReport} onDelete={handleDeleteReport} />} />
-          <Route path="/docs" element={<DocumentationView />} />
-          <Route path="*" element={<Navigate to="/" />} />
-        </Routes>
+        <ErrorBoundary onError={(err) => setRuntimeError(err)}>
+          <Routes>
+            <Route path="/" element={<DashboardView reports={reports} projects={projects} user={currentUser} users={users} />} />
+            <Route path="/weekly-reports" element={<WeeklyReportView reports={reports} projects={projects} user={currentUser} users={users} onUpdate={handleAddReport} onDelete={handleDeleteReport} />} />
+            <Route path="/create" element={<EditorView onSave={handleAddReport} user={currentUser} projects={projects} users={users} />} />
+            <Route path="/edit/:id" element={<EditorView onSave={handleAddReport} user={currentUser} projects={projects} users={users} reports={reports} />} />
+            <Route path="/report/:id" element={<DetailView reports={reports} projects={projects} user={currentUser} users={users} onUpdate={handleAddReport} onDelete={handleDeleteReport} />} />
+            <Route path="/docs" element={<DocumentationView />} />
+            <Route path="*" element={<Navigate to="/" />} />
+          </Routes>
+        </ErrorBoundary>
+
+        {runtimeError && (
+          <div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center p-4">
+            <div className="w-full max-w-3xl rounded-2xl bg-white shadow-xl border border-slate-200 overflow-hidden">
+              <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[14px] font-extrabold text-slate-900 tracking-tight">App error</div>
+                  <div className="mt-1 text-[12px] text-slate-500 truncate">
+                    Source: {runtimeError.source || 'unknown'}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setRuntimeError(null)}
+                    className="h-9 px-3 rounded-xl bg-slate-100 text-slate-700 font-semibold text-[12px] hover:bg-slate-200 transition-colors"
+                  >
+                    Close
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => window.location.reload()}
+                    className="h-9 px-3 rounded-xl bg-[#073D44] text-white font-semibold text-[12px] hover:bg-[#073D44]/90 transition-colors"
+                  >
+                    Reload
+                  </button>
+                </div>
+              </div>
+              <div className="px-5 py-4 space-y-3">
+                <div className="text-[13px] font-semibold text-slate-900">{runtimeError.message}</div>
+                {runtimeError.stack ? (
+                  <pre className="text-[11px] leading-[16px] bg-slate-50 border border-slate-200 rounded-xl p-3 overflow-auto max-h-[50vh] whitespace-pre-wrap">
+                    {runtimeError.stack}
+                  </pre>
+                ) : (
+                  <div className="text-[12px] text-slate-500">No stack trace available.</div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </Layout>
     </Router>
   );

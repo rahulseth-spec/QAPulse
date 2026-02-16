@@ -1,42 +1,21 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import DatePicker from 'react-datepicker';
+import { createPortal } from 'react-dom';
+import { useNavigate } from 'react-router-dom';
 import { WeeklyReport, Project, ReportStatus, User } from '../types';
-import { formatISODate, formatLocalISODate, getMonthName, parseISODateToLocal } from '../utils';
+import { formatISODate, getMonthName } from '../utils';
 import { ThemedSelect, type ThemedSelectOption } from '../components/ThemedSelect';
 
 interface WeeklyReportViewProps {
   reports: WeeklyReport[];
   projects: Project[];
   user: User;
+  users: User[];
   onUpdate: (report: WeeklyReport) => void;
+  onDelete: (id: string) => void;
 }
 
-const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({ reports, projects, user, onUpdate }) => {
+const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({ reports, projects, user, users, onUpdate, onDelete }) => {
   const navigate = useNavigate();
-
-  const PlusIcon = (props: { className?: string }) => (
-    <svg className={props.className} width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M12 5v14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      <path d="M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-
-  const CalendarIcon = (props: { className?: string }) => (
-    <svg className={props.className} width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M8 3v3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      <path d="M16 3v3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      <path d="M4 8h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      <path d="M6 5h12a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
-    </svg>
-  );
-
-  const ArrowRightIcon = (props: { className?: string }) => (
-    <svg className={props.className} width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M5 12h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      <path d="m13 6 6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
 
   const KebabIcon = (props: { className?: string }) => (
     <svg className={props.className} width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -45,276 +24,378 @@ const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({ reports, projects, 
       <path d="M12 15.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Z" fill="currentColor" />
     </svg>
   );
-  
-  const [createForm, setCreateForm] = useState({
-    projectId: projects[0]?.id || '',
-    startDate: null as Date | null,
-    endDate: null as Date | null
-  });
 
+  const [archiveMode, setArchiveMode] = useState<'PROJECT' | 'ALL'>('PROJECT');
   const [filters, setFilters] = useState({
     projectId: '',
-    year: new Date().getFullYear().toString(),
+    year: '',
     month: '',
     weekOfMonth: '',
+    status: '',
   });
 
-  const toStartOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  const addDays = (d: Date, days: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + days);
-  const isWeekday = (d: Date) => {
-    const day = d.getDay();
-    return day !== 0 && day !== 6;
-  };
-  const getWeekStartMonday = (d: Date) => {
-    const date = toStartOfDay(d);
-    const day = date.getDay();
-    const diffToMonday = day === 0 ? -6 : 1 - day;
-    return addDays(date, diffToMonday);
-  };
-  const getWeekEndFriday = (d: Date) => addDays(getWeekStartMonday(d), 4);
+  useEffect(() => {
+    if (archiveMode === 'ALL') {
+      setFilters(prev => (prev.projectId ? { ...prev, projectId: '' } : prev));
+    }
+  }, [archiveMode]);
 
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const menuRootRef = useRef<HTMLDivElement | null>(null);
+  const menuDropdownRef = useRef<HTMLDivElement | null>(null);
+  const menuAnchorRef = useRef<HTMLButtonElement | null>(null);
+  const [menuPos, setMenuPos] = useState<{ left: number; top: number; direction: 'down' | 'up' } | null>(null);
+
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const importModeRef = useRef<'PROJECT' | 'OVERALL'>('PROJECT');
+
+  const triggerImport = (mode: 'PROJECT' | 'OVERALL') => {
+    importModeRef.current = mode;
+    importInputRef.current?.click();
+  };
+
+  const handleImportSelected = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const list = Array.from(files);
+    const pptx = list.find(f => /\.pptx$/i.test(f.name));
+    const ppt = list.find(f => /\.ppt$/i.test(f.name));
+    if (!pptx && ppt) {
+      window.alert('Old .ppt files are not supported. Please save/export as .pptx and upload again.');
+      if (importInputRef.current) importInputRef.current.value = '';
+      return;
+    }
+    if (!pptx) {
+      window.alert('Please upload a .pptx file.');
+      if (importInputRef.current) importInputRef.current.value = '';
+      return;
+    }
+
+    const mode = importModeRef.current;
+    const projectId = mode === 'PROJECT' ? (filters.projectId || projects[0]?.id || '') : '';
+    const params = new URLSearchParams({
+      ...(mode === 'PROJECT' && projectId ? { projectId } : {}),
+      ...(mode === 'OVERALL' ? { mode: 'overall' } : {}),
+      import: '1',
+    }).toString();
+
+    try {
+      const buf = await pptx.arrayBuffer();
+      (window as any).__QAPULSE_IMPORT__ = { buf, name: pptx.name };
+      navigate(`/create?${params}`);
+    } finally {
+      if (importInputRef.current) importInputRef.current.value = '';
+    }
+  };
 
   useEffect(() => {
     const onDocClick = (e: MouseEvent) => {
       const root = menuRootRef.current;
       if (!root) return;
       if (e.target instanceof Node && root.contains(e.target)) return;
+      if (e.target instanceof Node && menuDropdownRef.current?.contains(e.target)) return;
       setOpenMenuId(null);
     };
     document.addEventListener('mousedown', onDocClick);
     return () => document.removeEventListener('mousedown', onDocClick);
   }, []);
 
-  const isWeekdayISO = (isoDate: string) => {
-    const day = parseISODateToLocal(isoDate).getDay();
-    return day !== 0 && day !== 6;
+  const updateMenuPosition = () => {
+    const anchor = menuAnchorRef.current;
+    if (!anchor) return;
+    const rect = anchor.getBoundingClientRect();
+    const gap = 8;
+    const menuWidth = 176;
+    const estimatedMenuHeight = 240;
+
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const direction = spaceBelow < estimatedMenuHeight + gap ? 'up' : 'down';
+
+    const desiredLeft = rect.right - menuWidth;
+    const left = Math.min(Math.max(8, desiredLeft), window.innerWidth - menuWidth - 8);
+
+    setMenuPos({
+      left,
+      top: direction === 'down' ? rect.bottom + gap : rect.top - gap,
+      direction,
+    });
   };
 
-  const getWeekStartMondayISO = (isoDate: string) => {
-    const date = parseISODateToLocal(isoDate);
-    const day = date.getDay();
-    const diffToMonday = day === 0 ? -6 : 1 - day;
-    date.setDate(date.getDate() + diffToMonday);
-    return formatLocalISODate(date);
-  };
+  useEffect(() => {
+    if (!openMenuId) return;
+    updateMenuPosition();
 
-  const addDaysISO = (isoDate: string, days: number) => {
-    const date = parseISODateToLocal(isoDate);
-    date.setDate(date.getDate() + days);
-    return formatLocalISODate(date);
-  };
-
-  const getWeekEndFridayISO = (isoDate: string) => addDaysISO(getWeekStartMondayISO(isoDate), 4);
-
-  const computeActiveContributorCount = (names: string) =>
-    names
-      .split(',')
-      .map(s => s.trim())
-      .filter(Boolean).length;
-
-  const isPublishable = (r: WeeklyReport) => {
-    if (!r.projectId || !r.startDate || !r.endDate) return false;
-    if (!isWeekdayISO(r.startDate) || !isWeekdayISO(r.endDate)) return false;
-    if (parseISODateToLocal(r.endDate) < parseISODateToLocal(r.startDate)) return false;
-    if (parseISODateToLocal(r.endDate) > parseISODateToLocal(getWeekEndFridayISO(r.startDate))) return false;
-
-    if (!Array.isArray(r.goals) || r.goals.length < 3) return false;
-    if (r.goals.slice(0, 3).some(g => !g.goal.trim() || !g.successMetric.trim())) return false;
-
-    if (!r.capacity) return false;
-    if (!Number.isFinite(r.capacity.plannedHours) || r.capacity.plannedHours <= 0) return false;
-    if (!Number.isFinite(r.capacity.committedHours) || r.capacity.committedHours <= 0) return false;
-    if (!r.capacity.loadStatus) return false;
-
-    if (!r.strength) return false;
-    if (!r.strength.activeContributorNames?.trim()) return false;
-    if (computeActiveContributorCount(r.strength.activeContributorNames) <= 0) return false;
-
-    if (!r.sprintHealth) return false;
-    if (!r.sprintHealth.startDate) return false;
-    if (r.sprintHealth.goalClarity === 'NA' || !r.sprintHealth.goalClarity) return false;
-    if (r.sprintHealth.readiness === 'NA' || !r.sprintHealth.readiness) return false;
-
-    if (!r.uedHealth) return false;
-    if (!r.uedHealth.lastDiscussion.trim()) return false;
-    if (!r.uedHealth.daysSinceLast.trim()) return false;
-    if (!r.uedHealth.nextScheduled.trim()) return false;
-    if (r.uedHealth.status === 'NA' || !r.uedHealth.status) return false;
-
-    if (!Array.isArray(r.bottlenecks) || r.bottlenecks.length < 3) return false;
-    if (r.bottlenecks.slice(0, 3).some(b => !b.trim())) return false;
-
-    if (!Array.isArray(r.decisions) || r.decisions.length < 3) return false;
-    if (r.decisions.slice(0, 3).some(d => !d.decisionText.trim())) return false;
-
-    if (!Array.isArray(r.threads) || r.threads.length < 5) return false;
-    if (r.threads.slice(0, 5).some(t => !t.product?.trim() || !t.thread.trim() || !t.ownerId || !t.status)) return false;
-
-    return true;
-  };
-
-  const publishReport = (r: WeeklyReport) => {
-    if (!isPublishable(r)) return;
-    onUpdate({ ...r, status: ReportStatus.PUBLISHED, publishedBy: user.id, updatedBy: user.id, updatedAt: new Date().toISOString() });
-    setOpenMenuId(null);
-    navigate(`/report/${r.id}`);
-  };
+    const onResize = () => updateMenuPosition();
+    const onScroll = () => updateMenuPosition();
+    window.addEventListener('resize', onResize);
+    window.addEventListener('scroll', onScroll, true);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('scroll', onScroll, true);
+    };
+  }, [openMenuId]);
 
   const years = ['2023', '2024', '2025', '2026'];
   const months = Array.from({ length: 12 }, (_, i) => ({ val: (i + 1).toString(), label: new Date(2000, i).toLocaleString('default', { month: 'long' }) }));
   const weeks = ['1', '2', '3', '4', '5'];
 
-  const createProjectOptions: ThemedSelectOption[] = projects.map(p => ({
-    value: p.id,
-    label: p.name,
-  }));
+  const filterProjectOptions: ThemedSelectOption[] = [{ value: '', label: 'Any' }, ...projects.map(p => ({ value: p.id, label: p.name }))];
 
-  const filterProjectOptions: ThemedSelectOption[] = [
-    { value: '', label: 'All' },
-    ...projects.map(p => ({ value: p.id, label: p.name })),
-  ];
-
-  const yearOptions: ThemedSelectOption[] = years.map(y => ({ value: y, label: y }));
+  const yearOptions: ThemedSelectOption[] = [{ value: '', label: 'Any' }, ...years.map(y => ({ value: y, label: y }))];
   const monthOptions: ThemedSelectOption[] = [{ value: '', label: 'Any' }, ...months.map(m => ({ value: m.val, label: m.label }))];
   const weekOptions: ThemedSelectOption[] = [{ value: '', label: 'Any' }, ...weeks.map(w => ({ value: w, label: w }))];
+  const statusOptions: ThemedSelectOption[] = [
+    { value: '', label: 'Any' },
+    { value: ReportStatus.DRAFT, label: 'DRAFT' },
+    { value: ReportStatus.PUBLISHED, label: 'PUBLISHED' },
+    { value: ReportStatus.APPROVED, label: 'APPROVED' },
+  ];
 
-  const createStartDate = createForm.startDate ? toStartOfDay(createForm.startDate) : null;
-  const endDateMax = createStartDate ? getWeekEndFriday(createStartDate) : undefined;
+  const getStatusDotClassName = (value: string) => {
+    if (value === ReportStatus.PUBLISHED) return 'bg-emerald-500';
+    if (value === ReportStatus.APPROVED) return 'bg-indigo-500';
+    if (value === ReportStatus.DRAFT) return 'bg-slate-400';
+    return 'bg-slate-300';
+  };
 
-  const handleCreateInitiate = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!createForm.startDate || !createForm.endDate) {
-      alert("Please select both start and end dates.");
-      return;
+  const findUserName = (id: string | undefined | null) => (id ? users.find(u => u.id === id)?.name : undefined);
+  const getUserName = (id: string | undefined | null) => findUserName(id) || '—';
+
+  const getPublishedByName = (report: WeeklyReport) => {
+    if (report.status === ReportStatus.PUBLISHED) {
+      return findUserName(report.publishedBy) || findUserName(report.updatedBy) || findUserName(report.createdBy) || '—';
     }
-
-    const startDateStr = formatLocalISODate(createForm.startDate);
-    const endDateStr = formatLocalISODate(createForm.endDate);
-
-    const params = new URLSearchParams({
-      projectId: createForm.projectId,
-      startDate: startDateStr,
-      endDate: endDateStr
-    }).toString();
-    
-    navigate(`/create?${params}`);
+    return getUserName(report.createdBy);
   };
 
   const filteredReports = reports.filter(r => {
-    const matchesProject = !filters.projectId || r.projectId === filters.projectId;
+    const matchesProject = archiveMode === 'ALL' ? true : (!filters.projectId || r.projectId === filters.projectId);
     const matchesYear = !filters.year || r.year.toString() === filters.year;
     const matchesMonth = !filters.month || r.month.toString() === filters.month;
     const matchesWeek = !filters.weekOfMonth || r.weekOfMonth.toString() === filters.weekOfMonth;
-    return matchesProject && matchesYear && matchesMonth && matchesWeek;
+    const matchesStatus = !filters.status || r.status === (filters.status as any);
+    return matchesProject && matchesYear && matchesMonth && matchesWeek && matchesStatus;
   });
 
-  const inputClasses = "w-full h-12 bg-white border border-slate-200 rounded-xl px-4 text-[14px] text-slate-900 outline-none focus:ring-4 focus:ring-[#407B7E]/20 focus:border-[#407B7E] transition-colors placeholder:text-slate-400";
+  const getProjectLabel = (report: WeeklyReport) => {
+    if (report.scope === 'OVERALL' || !report.projectId) return 'All Projects';
+    return projects.find(p => p.id === report.projectId)?.name || '—';
+  };
+
   const labelClasses = "block text-[12px] font-semibold text-slate-600 mb-2";
+
+  const openReport = openMenuId ? filteredReports.find(r => r.id === openMenuId) : undefined;
+  const dropdownNode =
+    openMenuId && openReport && menuPos
+      ? createPortal(
+          <div
+            ref={menuDropdownRef}
+            style={{
+              position: 'fixed',
+              left: menuPos.left,
+              width: 176,
+              top: menuPos.direction === 'down' ? menuPos.top : undefined,
+              bottom: menuPos.direction === 'up' ? window.innerHeight - menuPos.top : undefined,
+              zIndex: 60,
+            }}
+            className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden"
+          >
+            <button
+              type="button"
+              onClick={() => { setOpenMenuId(null); setMenuPos(null); navigate(`/report/${openReport.id}`); }}
+              className="w-full text-left px-3 py-2 text-[13px] font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+            >
+              View
+            </button>
+            {openReport.createdBy === user.id && (
+              <button
+                type="button"
+                onClick={() => { setOpenMenuId(null); setMenuPos(null); navigate(`/edit/${openReport.id}`); }}
+                className="w-full text-left px-3 py-2 text-[13px] font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+              >
+                Edit
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => { setOpenMenuId(null); setMenuPos(null); navigate(`/report/${openReport.id}`, { state: { autoPrint: true } }); }}
+              className="w-full text-left px-3 py-2 text-[13px] font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+            >
+              Download PDF
+            </button>
+            <button
+              type="button"
+              onClick={() => { setOpenMenuId(null); setMenuPos(null); navigate(`/report/${openReport.id}`, { state: { autoPpt: true } }); }}
+              className="w-full text-left px-3 py-2 text-[13px] font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+            >
+              Download PPT
+            </button>
+            {openReport.createdBy === user.id && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (!window.confirm('Delete this report?')) return;
+                  setOpenMenuId(null);
+                  setMenuPos(null);
+                  onDelete(openReport.id);
+                }}
+                className="w-full text-left px-3 py-2 text-[13px] font-semibold text-rose-700 hover:bg-rose-50 transition-colors"
+              >
+                Delete
+              </button>
+            )}
+          </div>,
+          document.body,
+        )
+      : null;
 
   return (
     <div className="space-y-10" ref={menuRootRef}>
       <div className="bg-gradient-to-br from-[#073D44] to-[#407B7E] rounded-[20px] p-8 md:p-10 text-white border border-white/10 shadow-sm">
-        <h1 className="text-[28px] leading-[36px] font-bold tracking-tight">Weekly Report</h1>
-        <p className="mt-3 text-[15px] leading-[24px] text-white/80">Create a new snapshot and review historical submissions.</p>
-      </div>
-
-      <section className="bg-white p-6 md:p-8 rounded-[20px] border border-slate-200 shadow-sm">
-        <div className="flex items-start gap-4 mb-7">
-          <div className="w-10 h-10 bg-[#073D44] rounded-xl flex items-center justify-center text-white shadow-sm shrink-0">
-            <PlusIcon className="text-white" />
-          </div>
+        <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
-            <h2 className="text-[18px] leading-[28px] font-bold text-slate-900 tracking-tight">Create Weekly Report</h2>
-            <p className="mt-1 text-[13px] leading-[20px] text-slate-500">Initiate a new snapshot for your team health and goals.</p>
+            <h1 className="text-[28px] leading-[36px] font-bold tracking-tight">Weekly Report</h1>
+            <p className="mt-3 text-[15px] leading-[24px] text-white/80">Review historical submissions and export reports.</p>
+          </div>
+          <div className="flex gap-4 shrink-0">
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".ppt,.pptx"
+              multiple
+              className="hidden"
+              onChange={(e) => handleImportSelected(e.target.files)}
+            />
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const projectId = filters.projectId || projects[0]?.id || '';
+                  const params = new URLSearchParams(projectId ? { projectId } : {}).toString();
+                  navigate(params ? `/create?${params}` : '/create');
+                }}
+                className="h-11 px-4 rounded-xl bg-white text-[#073D44] font-semibold text-[13px] hover:bg-white/90 transition-colors"
+              >
+                Create (Project wise)
+              </button>
+              <button
+                type="button"
+                aria-label="Import (Project wise)"
+                onClick={() => triggerImport('PROJECT')}
+                className="h-11 px-4 rounded-xl bg-white/10 text-white font-semibold text-[13px] border border-white/20 hover:bg-white/15 transition-colors inline-flex items-center gap-2"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path
+                    d="M12 3v10m0 0 4-4m-4 4-4-4"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                Project wise
+              </button>
+            </div>
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => navigate('/create?mode=overall')}
+                className="h-11 px-4 rounded-xl bg-white/10 text-white font-semibold text-[13px] border border-white/20 hover:bg-white/15 transition-colors"
+              >
+                Create (All Projects)
+              </button>
+              <button
+                type="button"
+                aria-label="Import (All Projects)"
+                onClick={() => triggerImport('OVERALL')}
+                className="h-11 px-4 rounded-xl bg-white/10 text-white font-semibold text-[13px] border border-white/20 hover:bg-white/15 transition-colors inline-flex items-center gap-2"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path
+                    d="M12 3v10m0 0 4-4m-4 4-4-4"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                All projects
+              </button>
+            </div>
           </div>
         </div>
-
-        <form onSubmit={handleCreateInitiate} className="grid grid-cols-1 md:grid-cols-3 gap-5 items-end">
-          <div className="space-y-2">
-            <label className={labelClasses}>Project/Program Name</label>
-            <ThemedSelect
-              value={createForm.projectId}
-              onChange={(projectId) => setCreateForm({ ...createForm, projectId })}
-              options={createProjectOptions}
-              placeholder={createProjectOptions.length > 0 ? 'Select a project' : 'No projects available'}
-              disabled={createProjectOptions.length === 0}
-            />
-          </div>
-          <div className="space-y-2">
-            <label className={labelClasses}>Start Date</label>
-            <DatePicker
-              icon={null}
-              selected={createForm.startDate}
-              onChange={(date: Date | null) =>
-                setCreateForm(prev => {
-                  if (!date) return { ...prev, startDate: null, endDate: null };
-                  const nextStart = toStartOfDay(date);
-                  const max = getWeekEndFriday(nextStart);
-                  const nextEnd = prev.endDate ? toStartOfDay(prev.endDate) : null;
-                  const endStillValid =
-                    nextEnd && nextEnd >= nextStart && nextEnd <= max && isWeekday(nextEnd);
-                  return {
-                    ...prev,
-                    startDate: nextStart,
-                    endDate: endStillValid ? nextEnd : null,
-                  };
-                })
-              }
-              placeholderText="Select start date"
-              className={inputClasses}
-              dateFormat="yyyy-MM-dd"
-              filterDate={isWeekday}
-            />
-          </div>
-          <div className="space-y-2">
-            <label className={labelClasses}>End Date</label>
-            <DatePicker
-              icon={null}
-              selected={createForm.endDate}
-              onChange={(date: Date | null) =>
-                setCreateForm(prev => ({
-                  ...prev,
-                  endDate: date ? toStartOfDay(date) : null,
-                }))
-              }
-              placeholderText="Select end date"
-              className={inputClasses}
-              dateFormat="yyyy-MM-dd"
-              minDate={createStartDate || undefined}
-              maxDate={endDateMax}
-              filterDate={isWeekday}
-            />
-          </div>
-          <div className="md:col-span-3 pt-2 flex justify-end">
-            <button 
-              type="submit"
-              className="h-12 px-6 bg-[#073D44] text-white font-semibold rounded-xl hover:bg-[#0A4A53] transition-colors active:scale-[0.99] flex items-center gap-2"
-            >
-              Initialize Report <ArrowRightIcon className="text-white" />
-            </button>
-          </div>
-        </form>
-      </section>
+      </div>
 
       <section className="bg-white p-6 md:p-8 rounded-[20px] border border-slate-200 shadow-sm">
         <div className="flex items-center justify-between mb-6">
           <div>
             <h2 className="text-[18px] leading-[28px] font-bold text-slate-900 tracking-tight">Weekly Report Archives</h2>
-            <p className="mt-1 text-[13px] leading-[20px] text-slate-500">Filter by project, time period, and week.</p>
+            <p className="mt-1 text-[13px] leading-[20px] text-slate-500">Filter by time period, status, and export reports.</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="inline-flex items-center p-1 rounded-xl bg-[#CFE8E8] border border-[#073D44]/15">
+              <button
+                type="button"
+                onClick={() => { setArchiveMode('PROJECT'); setOpenMenuId(null); }}
+                className={`h-9 px-3 rounded-lg text-[12px] font-semibold transition-colors ${
+                  archiveMode === 'PROJECT' ? 'bg-white text-[#073D44] shadow-sm' : 'text-[#073D44]/80 hover:text-[#073D44]'
+                }`}
+              >
+                Project wise
+              </button>
+              <button
+                type="button"
+                onClick={() => { setArchiveMode('ALL'); setOpenMenuId(null); }}
+                className={`h-9 px-3 rounded-lg text-[12px] font-semibold transition-colors ${
+                  archiveMode === 'ALL' ? 'bg-white text-[#073D44] shadow-sm' : 'text-[#073D44]/80 hover:text-[#073D44]'
+                }`}
+              >
+                All projects combined
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setFilters(prev => ({
+                  projectId: '',
+                  year: '',
+                  month: '',
+                  weekOfMonth: '',
+                  status: '',
+                }));
+                setOpenMenuId(null);
+              }}
+              className="h-10 px-4 rounded-xl bg-white border border-[#073D44]/30 text-[#073D44] font-semibold text-[13px] hover:bg-[#073D44] hover:text-white transition-colors"
+            >
+              Reset Filters
+            </button>
           </div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div>
-            <label className={labelClasses}>Project</label>
-            <ThemedSelect
-              value={filters.projectId}
-              onChange={(projectId) => setFilters({ ...filters, projectId })}
-              options={filterProjectOptions}
-              placeholder="All"
-            />
-          </div>
+        <div className={`grid grid-cols-1 ${archiveMode === 'PROJECT' ? 'md:grid-cols-5' : 'md:grid-cols-4'} gap-4`}>
+          {archiveMode === 'PROJECT' && (
+            <div>
+              <label className={labelClasses}>Project</label>
+              <ThemedSelect
+                value={filters.projectId}
+                onChange={(projectId) => setFilters({ ...filters, projectId })}
+                options={filterProjectOptions}
+                placeholder="Any"
+              />
+            </div>
+          )}
           <div>
             <label className={labelClasses}>Year</label>
             <ThemedSelect
@@ -341,73 +422,102 @@ const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({ reports, projects, 
               placeholder="Any"
             />
           </div>
+          <div>
+            <label className={labelClasses}>Status</label>
+            <ThemedSelect
+              value={filters.status}
+              onChange={(status) => setFilters({ ...filters, status })}
+              options={statusOptions}
+              placeholder="Any"
+              getOptionDotClassName={getStatusDotClassName}
+            />
+          </div>
         </div>
-        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="mt-6">
           {filteredReports.length > 0 ? (
-            filteredReports.map(r => (
-              <div key={r.id} className="p-5 bg-white border border-slate-200 rounded-xl hover:border-[#407B7E]/40 hover:shadow-sm transition-all">
-                <div className="flex items-center justify-between gap-3">
-                  <Link to={`/report/${r.id}`} className="text-[14px] font-semibold text-slate-900 hover:text-[#073D44] truncate">
-                    {r.title}
-                  </Link>
-                  <div className="relative flex items-center gap-2 shrink-0">
-                    <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-slate-100 text-slate-600 ring-1 ring-slate-200">{r.status}</span>
-                    <button
-                      type="button"
-                      onClick={() => setOpenMenuId(prev => (prev === r.id ? null : r.id))}
-                      className="w-9 h-9 inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-colors"
-                      aria-label="Report actions"
-                    >
-                      <KebabIcon />
-                    </button>
-                    {openMenuId === r.id && (
-                      <div className="absolute right-0 top-11 w-44 bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden z-20">
-                        <button
-                          type="button"
-                          onClick={() => { setOpenMenuId(null); navigate(`/report/${r.id}`); }}
-                          className="w-full text-left px-3 py-2 text-[13px] font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+            <div className="overflow-x-auto overflow-y-visible border border-slate-200 rounded-xl">
+              <table className="min-w-[980px] w-full border-collapse">
+                <thead className="bg-[#CFE8E8]">
+                  <tr>
+                    <th className="text-left text-[12px] font-bold text-[#073D44] px-4 py-3 border-b border-[#073D44]/15">Project</th>
+                    <th className="text-left text-[12px] font-bold text-[#073D44] px-4 py-3 border-b border-[#073D44]/15">Published By</th>
+                    <th className="text-left text-[12px] font-bold text-[#073D44] px-4 py-3 border-b border-[#073D44]/15">Week</th>
+                    <th className="text-left text-[12px] font-bold text-[#073D44] px-4 py-3 border-b border-[#073D44]/15">Month</th>
+                    <th className="text-left text-[12px] font-bold text-[#073D44] px-4 py-3 border-b border-[#073D44]/15">Status</th>
+                    <th className="text-left text-[12px] font-bold text-[#073D44] px-4 py-3 border-b border-[#073D44]/15">Last Updated</th>
+                    <th className="text-right text-[12px] font-bold text-[#073D44] px-4 py-3 border-b border-[#073D44]/15">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredReports.map(r => (
+                    <tr key={r.id} className="hover:bg-slate-50/60 transition-colors">
+                      <td className="px-4 py-3 border-b border-slate-100">
+                        <span className="text-[13px] font-semibold text-slate-900">
+                          {getProjectLabel(r)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 border-b border-slate-100">
+                        <span className="text-[13px] font-semibold text-slate-900 block max-w-[320px] truncate">
+                          {getPublishedByName(r)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 border-b border-slate-100 text-[13px] text-slate-700">
+                        Week {r.weekOfMonth}
+                      </td>
+                      <td className="px-4 py-3 border-b border-slate-100 text-[13px] text-slate-700">
+                        {getMonthName(r.month)}
+                      </td>
+                      <td className="px-4 py-3 border-b border-slate-100">
+                        <span
+                          className={`inline-flex items-center text-[10px] font-bold uppercase px-2 py-0.5 rounded ring-1 ${
+                            r.status === ReportStatus.PUBLISHED
+                              ? 'bg-emerald-50 text-emerald-700 ring-emerald-100'
+                              : r.status === ReportStatus.APPROVED
+                                ? 'bg-indigo-50 text-indigo-700 ring-indigo-100'
+                                : 'bg-slate-100 text-slate-600 ring-slate-200'
+                          }`}
                         >
-                          View
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setOpenMenuId(null); navigate(`/edit/${r.id}`); }}
-                          className="w-full text-left px-3 py-2 text-[13px] font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
-                        >
-                          Edit
-                        </button>
-                        {r.status === ReportStatus.DRAFT && (
+                          {r.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 border-b border-slate-100 text-[13px] text-slate-600">
+                        {formatISODate(r.updatedAt)}
+                      </td>
+                      <td className="px-4 py-3 border-b border-slate-100 text-right">
+                        <div className="relative inline-flex items-center justify-end">
                           <button
                             type="button"
-                            onClick={() => publishReport(r)}
-                            disabled={!isPublishable(r)}
-                            className={`w-full text-left px-3 py-2 text-[13px] font-semibold transition-colors ${
-                              isPublishable(r) ? 'text-[#073D44] hover:bg-[#407B7E]/10' : 'text-slate-400 cursor-not-allowed'
-                            }`}
+                            onClick={(e) => {
+                              const nextId = openMenuId === r.id ? null : r.id;
+                              if (!nextId) {
+                                setOpenMenuId(null);
+                                setMenuPos(null);
+                                return;
+                              }
+                              menuAnchorRef.current = e.currentTarget;
+                              setOpenMenuId(nextId);
+                              updateMenuPosition();
+                            }}
+                            className="w-9 h-9 inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-colors"
+                            aria-label="Report actions"
                           >
-                            Publish
+                            <KebabIcon />
                           </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <div className="text-[12px] text-slate-500 mt-2 flex gap-4">
-                  <span className="flex items-center gap-1.5">
-                    <CalendarIcon className="text-slate-400" />
-                    {getMonthName(r.month)} - Week {r.weekOfMonth}
-                  </span>
-                  <span className="text-slate-400">Updated {formatISODate(r.updatedAt)}</span>
-                </div>
-              </div>
-            ))
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           ) : (
-            <div className="md:col-span-2 text-[13px] text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-4 py-10 text-center">
+            <div className="text-[13px] text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-4 py-10 text-center">
               No reports found for the selected filters.
             </div>
           )}
         </div>
       </section>
+      {dropdownNode}
     </div>
   );
 };
