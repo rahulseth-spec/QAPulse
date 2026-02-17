@@ -201,7 +201,14 @@ function requireAuth(req, res, next) {
 app.get('/api/reports', requireAuth, async (req, res) => {
   try {
     if (!dbReady) return res.status(503).json({ error: 'Database not ready' });
-    const items = await WeeklyReport.find({ createdBy: req.userId }).sort({ updatedAt: -1 }).lean();
+    const user = await User.findById(req.userId).lean();
+    if (!user) return res.status(401).json({ error: 'Invalid auth user' });
+
+    const userProjects = Array.isArray(user.projects) ? user.projects.filter(Boolean) : [];
+    const projectFilter = userProjects.length ? { projectId: { $in: [...userProjects, ''] } } : null;
+    const query = projectFilter ? { $or: [{ createdBy: req.userId }, projectFilter] } : {};
+
+    const items = await WeeklyReport.find(query).sort({ updatedAt: -1 }).lean();
     const normalized = items.map(doc => {
       const id = doc.reportId;
       const createdAt = doc.createdAt instanceof Date ? doc.createdAt.toISOString() : doc.createdAt;
