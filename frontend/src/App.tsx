@@ -52,6 +52,20 @@ const apiUrl = (path: string) => {
   return `${API_BASE}/${path}`;
 };
 
+const isRenderWakingPage = (text: string) => {
+  return /service waking up|incoming http request detected|steady hands|application loading/i.test(text);
+};
+
+const readJsonOrText = async (res: Response) => {
+  const contentType = res.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    const data = await res.json().catch(() => null);
+    return { kind: 'json' as const, data, contentType };
+  }
+  const text = await res.text().catch(() => '');
+  return { kind: 'text' as const, text, contentType };
+};
+
 const App: React.FC = () => {
   const [users, setUsers] = useState<User[]>(MOCK_USERS);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -239,9 +253,25 @@ const App: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim(), password }),
       });
-      const data = await res.json();
+      const parsed = await readJsonOrText(res);
+      const data = parsed.kind === 'json' ? parsed.data : null;
       if (!res.ok) {
-        setError(data.error || 'Login failed');
+        if (parsed.kind === 'text' && isRenderWakingPage(parsed.text)) {
+          setError('Backend is waking up on Render. Try again in 20–30 seconds.');
+        } else {
+          const msg =
+            (typeof data?.error === 'string' && data.error) ||
+            (parsed.kind === 'text' ? parsed.text : '') ||
+            'Login failed';
+          setError(msg);
+        }
+        return;
+      }
+      if (!data?.user || !data?.token) {
+        const msg = parsed.kind === 'text' && isRenderWakingPage(parsed.text)
+          ? 'Backend is waking up on Render. Try again in 20–30 seconds.'
+          : 'Unexpected API response. Check VITE_API_BASE_URL and backend logs.';
+        setError(msg);
         return;
       }
       const user: User = {
@@ -283,9 +313,25 @@ const App: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
+      const parsed = await readJsonOrText(res);
+      const data = parsed.kind === 'json' ? parsed.data : null;
       if (!res.ok) {
-        setError(data.error || 'Signup failed');
+        if (parsed.kind === 'text' && isRenderWakingPage(parsed.text)) {
+          setError('Backend is waking up on Render. Try again in 20–30 seconds.');
+        } else {
+          const msg =
+            (typeof data?.error === 'string' && data.error) ||
+            (parsed.kind === 'text' ? parsed.text : '') ||
+            'Signup failed';
+          setError(msg);
+        }
+        return;
+      }
+      if (!data?.user || !data?.token) {
+        const msg = parsed.kind === 'text' && isRenderWakingPage(parsed.text)
+          ? 'Backend is waking up on Render. Try again in 20–30 seconds.'
+          : 'Unexpected API response. Check VITE_API_BASE_URL and backend logs.';
+        setError(msg);
         return;
       }
       const user: User = {
@@ -710,7 +756,8 @@ const App: React.FC = () => {
                     setOauthBusy(true);
                     try {
                       const res = await fetch(apiUrl('/api/auth/google/status'));
-                      const data = await res.json();
+                      const parsed = await readJsonOrText(res);
+                      const data = parsed.kind === 'json' ? parsed.data : null;
                       if (!res.ok || !data?.enabled) {
                         const missing = Array.isArray(data?.missing) ? data.missing.join(', ') : '';
                         setError(missing ? `Google sign-in is not configured (${missing}).` : 'Google sign-in is not configured.');
