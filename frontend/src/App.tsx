@@ -52,8 +52,12 @@ const apiUrl = (path: string) => {
   return `${API_BASE}/${path}`;
 };
 
+const looksLikeHtml = (text: string) => {
+  return /<!doctype|<html[\s>]/i.test(text);
+};
+
 const isRenderWakingPage = (text: string) => {
-  return /service waking up|incoming http request detected|steady hands|application loading/i.test(text);
+  return /service waking up|incoming http request detected|steady hands|application loading|render - application loading/i.test(text);
 };
 
 const readJsonOrText = async (res: Response) => {
@@ -268,9 +272,12 @@ const App: React.FC = () => {
         return;
       }
       if (!data?.user || !data?.token) {
-        const msg = parsed.kind === 'text' && isRenderWakingPage(parsed.text)
-          ? 'Backend is waking up on Render. Try again in 20–30 seconds.'
-          : 'Unexpected API response. Check VITE_API_BASE_URL and backend logs.';
+        const msg =
+          parsed.kind === 'text' && isRenderWakingPage(parsed.text)
+            ? 'Backend is waking up on Render. Try again in 20–30 seconds.'
+            : parsed.kind === 'text' && looksLikeHtml(parsed.text)
+              ? `API returned HTML (not JSON). Set VITE_API_BASE_URL to your backend URL. Current: ${API_BASE || '(not set)'}`
+              : `Unexpected API response. Check VITE_API_BASE_URL. Current: ${API_BASE || '(not set)'}`;
         setError(msg);
         return;
       }
@@ -328,9 +335,12 @@ const App: React.FC = () => {
         return;
       }
       if (!data?.user || !data?.token) {
-        const msg = parsed.kind === 'text' && isRenderWakingPage(parsed.text)
-          ? 'Backend is waking up on Render. Try again in 20–30 seconds.'
-          : 'Unexpected API response. Check VITE_API_BASE_URL and backend logs.';
+        const msg =
+          parsed.kind === 'text' && isRenderWakingPage(parsed.text)
+            ? 'Backend is waking up on Render. Try again in 20–30 seconds.'
+            : parsed.kind === 'text' && looksLikeHtml(parsed.text)
+              ? `API returned HTML (not JSON). Set VITE_API_BASE_URL to your backend URL. Current: ${API_BASE || '(not set)'}`
+              : `Unexpected API response. Check VITE_API_BASE_URL. Current: ${API_BASE || '(not set)'}`;
         setError(msg);
         return;
       }
