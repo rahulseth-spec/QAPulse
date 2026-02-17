@@ -38,12 +38,27 @@ class ErrorBoundary extends Component<
 }
 
 const API_BASE = (() => {
+  const normalize = (value: unknown) => {
+    if (typeof value !== 'string') return '';
+    return value.trim().replace(/\/+$/, '');
+  };
+
   try {
-    const base = (import.meta as any)?.env?.VITE_API_BASE_URL;
-    return typeof base === 'string' ? base.trim().replace(/\/+$/, '') : '';
-  } catch {
-    return '';
-  }
+    const fromEnv = normalize((import.meta as any)?.env?.VITE_API_BASE_URL);
+    if (fromEnv) return fromEnv;
+  } catch {}
+
+  try {
+    const fromStorage = normalize(window.localStorage.getItem('qapulse_api_base'));
+    if (fromStorage) return fromStorage;
+  } catch {}
+
+  try {
+    const host = window.location.hostname;
+    if (host === 'qapulse.onrender.com') return 'https://qapulsebend.onrender.com';
+  } catch {}
+
+  return '';
 })();
 
 const apiUrl = (path: string) => {
