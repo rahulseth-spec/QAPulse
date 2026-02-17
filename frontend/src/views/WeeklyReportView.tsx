@@ -256,7 +256,7 @@ const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({ reports, projects, 
             <h1 className="text-[28px] leading-[36px] font-bold tracking-tight">Weekly Report</h1>
             <p className="mt-3 text-[15px] leading-[24px] text-white/80">Review historical submissions and export reports.</p>
           </div>
-          <div className="flex gap-4 shrink-0">
+          <div className="shrink-0">
             <input
               ref={importInputRef}
               type="file"
@@ -265,75 +265,84 @@ const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({ reports, projects, 
               className="hidden"
               onChange={(e) => handleImportSelected(e.target.files)}
             />
-            <div className="flex flex-col gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  const projectId = filters.projectId || projects[0]?.id || '';
-                  const params = new URLSearchParams(projectId ? { projectId } : {}).toString();
-                  navigate(params ? `/create?${params}` : '/create');
-                }}
-                className="h-11 px-4 rounded-xl bg-white text-[#073D44] font-semibold text-[13px] hover:bg-white/90 transition-colors"
-              >
-                Create (Project wise)
-              </button>
-              <button
-                type="button"
-                aria-label="Import (Project wise)"
-                onClick={() => triggerImport('PROJECT')}
-                className="h-11 px-4 rounded-xl bg-white/10 text-white font-semibold text-[13px] border border-white/20 hover:bg-white/15 transition-colors inline-flex items-center gap-2"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path
-                    d="M12 3v10m0 0 4-4m-4 4-4-4"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                  <path
-                    d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-                Project wise
-              </button>
-            </div>
-            <div className="flex flex-col gap-2">
-              <button
-                type="button"
-                onClick={() => navigate('/create?mode=overall')}
-                className="h-11 px-4 rounded-xl bg-white/10 text-white font-semibold text-[13px] border border-white/20 hover:bg-white/15 transition-colors"
-              >
-                Create (All Projects)
-              </button>
-              <button
-                type="button"
-                aria-label="Import (All Projects)"
-                onClick={() => triggerImport('OVERALL')}
-                className="h-11 px-4 rounded-xl bg-white/10 text-white font-semibold text-[13px] border border-white/20 hover:bg-white/15 transition-colors inline-flex items-center gap-2"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path
-                    d="M12 3v10m0 0 4-4m-4 4-4-4"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                  <path
-                    d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-                All projects
-              </button>
+            <div className="rounded-2xl bg-white/10 border border-white/15 p-3 backdrop-blur-sm">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 min-w-[280px]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const projectId = filters.projectId || projects[0]?.id || '';
+                    const params = new URLSearchParams(projectId ? { projectId } : {}).toString();
+                    navigate(params ? `/create?${params}` : '/create');
+                  }}
+                  className="h-11 w-full px-4 rounded-xl bg-white text-[#073D44] font-semibold text-[13px] shadow-sm hover:bg-white/90 transition-colors inline-flex items-center justify-center gap-2"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  </svg>
+                  Create (Project wise)
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => navigate('/create?mode=overall')}
+                  className="h-11 w-full px-4 rounded-xl bg-white text-[#073D44] font-semibold text-[13px] shadow-sm hover:bg-white/90 transition-colors inline-flex items-center justify-center gap-2"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  </svg>
+                  Create (All Projects)
+                </button>
+
+                <button
+                  type="button"
+                  aria-label="Import (Project wise)"
+                  onClick={() => triggerImport('PROJECT')}
+                  className="h-11 w-full px-4 rounded-xl bg-white/12 text-white font-semibold text-[13px] border border-white/20 hover:bg-white/18 transition-colors inline-flex items-center justify-center gap-2"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path
+                      d="M12 3v10m0 0 4-4m-4 4-4-4"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    <path
+                      d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                  Import (Project wise)
+                </button>
+
+                <button
+                  type="button"
+                  aria-label="Import (All Projects)"
+                  onClick={() => triggerImport('OVERALL')}
+                  className="h-11 w-full px-4 rounded-xl bg-white/12 text-white font-semibold text-[13px] border border-white/20 hover:bg-white/18 transition-colors inline-flex items-center justify-center gap-2"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path
+                      d="M12 3v10m0 0 4-4m-4 4-4-4"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    <path
+                      d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                  Import (All Projects)
+                </button>
+              </div>
             </div>
           </div>
         </div>
