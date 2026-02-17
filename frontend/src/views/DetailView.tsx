@@ -241,6 +241,8 @@ const DetailView: React.FC<DetailProps> = ({ reports, projects, user, users, onU
     const SH_RECT = ShapeType.rect || 'rect';
     const SH_RRECT = ShapeType.roundRect || 'roundRect';
 
+    const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
     const truncate = (value: string, max: number) => {
       const s = (value || '').trim();
       if (!s) return '';
@@ -267,10 +269,10 @@ const DetailView: React.FC<DetailProps> = ({ reports, projects, user, users, onU
 
     const addTopBar = (slide: any) => {
       slide.background = { color: theme.surface };
-      slide.addShape(SH_RECT, { x: 0, y: 0, w: SLIDE_W, h: 0.78, fill: { color: theme.brand } });
+      slide.addShape(SH_RECT, { x: 0, y: 0, w: SLIDE_W, h: 0.65, fill: { color: theme.brand } });
       slide.addText('QAPulse | QA Weekly Reports', {
         x: 0.6,
-        y: 0.22,
+        y: 0.18,
         w: 8.5,
         h: 0.4,
         fontFace: 'Calibri',
@@ -280,7 +282,7 @@ const DetailView: React.FC<DetailProps> = ({ reports, projects, user, users, onU
       });
       slide.addText(formatLocalISODate(new Date()), {
         x: 9.2,
-        y: 0.22,
+        y: 0.18,
         w: 3.5,
         h: 0.4,
         fontFace: 'Calibri',
@@ -291,6 +293,11 @@ const DetailView: React.FC<DetailProps> = ({ reports, projects, user, users, onU
     };
 
     const addCard = (slide: any, opts: { x: number; y: number; w: number; h: number; title: string }) => {
+      const headerH = 0.58;
+      const innerX = 0.32;
+      const bodyOffsetY = 0.74;
+      const bodyBottomPad = 0.18;
+
       slide.addShape(SH_RRECT, {
         x: opts.x,
         y: opts.y,
@@ -304,22 +311,27 @@ const DetailView: React.FC<DetailProps> = ({ reports, projects, user, users, onU
         x: opts.x,
         y: opts.y,
         w: opts.w,
-        h: 0.6,
+        h: headerH,
         fill: { color: theme.headerFill },
         line: { color: theme.line, width: 1 },
         radius: 12,
       });
       slide.addText(opts.title, {
-        x: opts.x + 0.3,
-        y: opts.y + 0.16,
-        w: opts.w - 0.6,
+        x: opts.x + innerX,
+        y: opts.y + 0.14,
+        w: opts.w - innerX * 2,
         h: 0.4,
         fontFace: 'Calibri',
         fontSize: 14,
         bold: true,
         color: theme.headerText,
       });
-      return { bodyX: opts.x + 0.3, bodyY: opts.y + 0.8, bodyW: opts.w - 0.6, bodyH: opts.h - 1.0 };
+      return {
+        bodyX: opts.x + innerX,
+        bodyY: opts.y + bodyOffsetY,
+        bodyW: opts.w - innerX * 2,
+        bodyH: opts.h - bodyOffsetY - bodyBottomPad,
+      };
     };
 
     function chunk<T>(arr: T[], size: number): T[][] {
@@ -332,17 +344,20 @@ const DetailView: React.FC<DetailProps> = ({ reports, projects, user, users, onU
     (goalChunks.length ? goalChunks : [[]]).forEach((chunkGoals, idx) => {
       const slide = pptx.addSlide();
       addTopBar(slide);
-      slide.addText(title, { x: 0.6, y: 1.05, w: 12.2, h: 0.6, fontFace: 'Calibri', fontSize: 20, bold: true, color: theme.text });
-
-      const card = addCard(slide, { x: 0.6, y: 1.75, w: 12.15, h: 5.35, title: idx === 0 ? 'Goals & Team Health' : 'Goals & Team Health (cont.)' });
+      slide.addText(title, { x: 0.6, y: 0.86, w: 12.2, h: 0.6, fontFace: 'Calibri', fontSize: 20, bold: true, color: theme.text });
 
       const colGoal = 5.0;
       const colMetric = 4.3;
       const colHealth = 1.3;
       const colConf = 1.25;
+
+      const rowH = 0.52;
+      const visibleRows = chunkGoals.length;
+      const tableH = rowH * (1 + Math.max(1, visibleRows));
+      const cardH = clamp(0.92 + tableH + 0.35, 3.2, 5.45);
+      const card = addCard(slide, { x: 0.6, y: 1.45, w: 12.15, h: cardH, title: idx === 0 ? 'Goals & Team Health' : 'Goals & Team Health (cont.)' });
       const tableX = card.bodyX;
       const tableY = card.bodyY;
-      const rowH = 0.55;
 
       slide.addShape(SH_RRECT, {
         x: tableX,
@@ -353,27 +368,27 @@ const DetailView: React.FC<DetailProps> = ({ reports, projects, user, users, onU
         line: { color: theme.line, width: 1 },
         radius: 8,
       });
-      slide.addText('Goal', { x: tableX + 0.2, y: tableY + 0.16, w: colGoal - 0.3, h: 0.3, fontFace: 'Calibri', fontSize: 11, bold: true, color: theme.headerText });
-      slide.addText('Success Metric', { x: tableX + colGoal, y: tableY + 0.16, w: colMetric - 0.2, h: 0.3, fontFace: 'Calibri', fontSize: 11, bold: true, color: theme.headerText });
-      slide.addText('Health', { x: tableX + colGoal + colMetric, y: tableY + 0.16, w: colHealth, h: 0.3, fontFace: 'Calibri', fontSize: 11, bold: true, color: theme.headerText, align: 'center' });
-      slide.addText('Confidence', { x: tableX + colGoal + colMetric + colHealth, y: tableY + 0.16, w: colConf, h: 0.3, fontFace: 'Calibri', fontSize: 11, bold: true, color: theme.headerText, align: 'center' });
+      slide.addText('Goal', { x: tableX + 0.2, y: tableY + 0.14, w: colGoal - 0.3, h: 0.3, fontFace: 'Calibri', fontSize: 11, bold: true, color: theme.headerText });
+      slide.addText('Success Metric', { x: tableX + colGoal, y: tableY + 0.14, w: colMetric - 0.2, h: 0.3, fontFace: 'Calibri', fontSize: 11, bold: true, color: theme.headerText });
+      slide.addText('Health', { x: tableX + colGoal + colMetric, y: tableY + 0.14, w: colHealth, h: 0.3, fontFace: 'Calibri', fontSize: 11, bold: true, color: theme.headerText, align: 'center' });
+      slide.addText('Confidence', { x: tableX + colGoal + colMetric + colHealth, y: tableY + 0.14, w: colConf, h: 0.3, fontFace: 'Calibri', fontSize: 11, bold: true, color: theme.headerText, align: 'center' });
 
       chunkGoals.forEach((g, rowIdx) => {
         const y = tableY + rowH + rowIdx * rowH;
         slide.addShape(SH_RECT, { x: tableX, y, w: card.bodyW, h: rowH, fill: { color: 'FFFFFF' }, line: { color: theme.line, width: 1 } });
-        slide.addText(truncate(g.goal, 80) || '—', { x: tableX + 0.2, y: y + 0.12, w: colGoal - 0.3, h: 0.34, fontFace: 'Calibri', fontSize: 11, color: theme.subtext });
-        slide.addText(truncate(g.successMetric, 70) || '—', { x: tableX + colGoal, y: y + 0.12, w: colMetric - 0.2, h: 0.34, fontFace: 'Calibri', fontSize: 11, color: theme.subtext });
+        slide.addText(truncate(g.goal, 80) || '—', { x: tableX + 0.2, y: y + 0.1, w: colGoal - 0.3, h: 0.34, fontFace: 'Calibri', fontSize: 11, color: theme.subtext });
+        slide.addText(truncate(g.successMetric, 70) || '—', { x: tableX + colGoal, y: y + 0.1, w: colMetric - 0.2, h: 0.34, fontFace: 'Calibri', fontSize: 11, color: theme.subtext });
 
         const health = pillColors(g.health);
         const healthX = tableX + colGoal + colMetric + 0.08;
-        slide.addShape(SH_RRECT, { x: healthX, y: y + 0.13, w: colHealth - 0.16, h: 0.3, fill: { color: health.fill }, line: { color: health.line, width: 1 }, radius: 10 });
-        slide.addText(String(g.health || 'N/A').toUpperCase(), { x: healthX, y: y + 0.16, w: colHealth - 0.16, h: 0.25, fontFace: 'Calibri', fontSize: 9, bold: true, color: health.text, align: 'center' });
+        slide.addShape(SH_RRECT, { x: healthX, y: y + 0.11, w: colHealth - 0.16, h: 0.3, fill: { color: health.fill }, line: { color: health.line, width: 1 }, radius: 10 });
+        slide.addText(String(g.health || 'N/A').toUpperCase(), { x: healthX, y: y + 0.14, w: colHealth - 0.16, h: 0.25, fontFace: 'Calibri', fontSize: 9, bold: true, color: health.text, align: 'center' });
 
         const confValue = g.confidence === 'MED' ? 'MEDIUM' : String(g.confidence || 'N/A').toUpperCase();
         const conf = confidenceColors(confValue);
         const confX = tableX + colGoal + colMetric + colHealth + 0.08;
-        slide.addShape(SH_RRECT, { x: confX, y: y + 0.13, w: colConf - 0.16, h: 0.3, fill: { color: conf.fill }, line: { color: conf.line, width: 1 }, radius: 10 });
-        slide.addText(confValue, { x: confX, y: y + 0.16, w: colConf - 0.16, h: 0.25, fontFace: 'Calibri', fontSize: 9, bold: true, color: conf.text, align: 'center' });
+        slide.addShape(SH_RRECT, { x: confX, y: y + 0.11, w: colConf - 0.16, h: 0.3, fill: { color: conf.fill }, line: { color: conf.line, width: 1 }, radius: 10 });
+        slide.addText(confValue, { x: confX, y: y + 0.14, w: colConf - 0.16, h: 0.25, fontFace: 'Calibri', fontSize: 9, bold: true, color: conf.text, align: 'center' });
       });
 
       if (!chunkGoals.length) {
@@ -410,10 +425,10 @@ const DetailView: React.FC<DetailProps> = ({ reports, projects, user, users, onU
       const slideTitleProjectName = s.projectNameOverride || slideProject?.name || 'Project';
       const slide2 = pptx.addSlide();
       addTopBar(slide2);
-      slide2.addText(`${slideTitleProjectName} Execution Readiness & Friction`, { x: 0.6, y: 1.05, w: 12.2, h: 0.6, fontFace: 'Calibri', fontSize: 18, bold: true, color: theme.text });
+      slide2.addText(`${slideTitleProjectName} Execution Readiness & Friction`, { x: 0.6, y: 0.86, w: 12.2, h: 0.6, fontFace: 'Calibri', fontSize: 18, bold: true, color: theme.text });
 
-      const leftCard = addCard(slide2, { x: 0.6, y: 1.75, w: 6.0, h: 5.35, title: 'Team Health' });
-      const rightCard = addCard(slide2, { x: 6.85, y: 1.75, w: 5.9, h: 5.35, title: 'Friction' });
+      const leftCard = addCard(slide2, { x: 0.6, y: 1.45, w: 6.0, h: 5.45, title: 'Team Health' });
+      const rightCard = addCard(slide2, { x: 6.85, y: 1.45, w: 5.9, h: 5.45, title: 'Friction' });
 
       const addSectionTitle = (slide: any, x: number, y: number, w: number, text: string) => {
         slide.addText(text, { x, y, w, h: 0.3, fontFace: 'Calibri', fontSize: 12, bold: true, color: theme.text });
@@ -481,30 +496,33 @@ const DetailView: React.FC<DetailProps> = ({ reports, projects, user, users, onU
     (threadChunks.length ? threadChunks : [[]]).forEach((chunkThreads, chunkIdx) => {
       const slide = pptx.addSlide();
       addTopBar(slide);
-      slide.addText('Top Team Threads (Cognitive Load)', { x: 0.6, y: 1.05, w: 12.2, h: 0.6, fontFace: 'Calibri', fontSize: 18, bold: true, color: theme.text });
+      slide.addText('Top Team Threads (Cognitive Load)', { x: 0.6, y: 0.86, w: 12.2, h: 0.6, fontFace: 'Calibri', fontSize: 18, bold: true, color: theme.text });
 
-      const card = addCard(slide, { x: 0.6, y: 1.75, w: 12.15, h: 5.35, title: chunkIdx === 0 ? 'Threads' : 'Threads (cont.)' });
+      const rowH = 0.5;
+      const visibleRows = Math.min(8, chunkThreads.length);
+      const tableH = rowH * (1 + Math.max(1, visibleRows));
+      const cardH = clamp(0.92 + tableH + 0.35, 3.2, 5.45);
+      const card = addCard(slide, { x: 0.6, y: 1.45, w: 12.15, h: cardH, title: chunkIdx === 0 ? 'Threads' : 'Threads (cont.)' });
       const x = card.bodyX;
       const y = card.bodyY;
-      const rowH = 0.55;
-      const colProduct = 2.4;
-      const colThread = 6.2;
-      const colOwner = 2.2;
+      const colProduct = 2.2;
+      const colThread = 5.4;
+      const colOwner = 2.15;
       const colStatus = card.bodyW - colProduct - colThread - colOwner;
 
       slide.addShape(SH_RRECT, { x, y, w: card.bodyW, h: rowH, fill: { color: theme.headerFill }, line: { color: theme.line, width: 1 }, radius: 8 });
-      slide.addText('Product', { x: x + 0.2, y: y + 0.16, w: colProduct - 0.2, h: 0.3, fontFace: 'Calibri', fontSize: 11, bold: true, color: theme.headerText });
-      slide.addText('Thread', { x: x + colProduct, y: y + 0.16, w: colThread - 0.2, h: 0.3, fontFace: 'Calibri', fontSize: 11, bold: true, color: theme.headerText });
-      slide.addText('Owner', { x: x + colProduct + colThread, y: y + 0.16, w: colOwner - 0.2, h: 0.3, fontFace: 'Calibri', fontSize: 11, bold: true, color: theme.headerText });
-      slide.addText('Status', { x: x + colProduct + colThread + colOwner, y: y + 0.16, w: colStatus - 0.2, h: 0.3, fontFace: 'Calibri', fontSize: 11, bold: true, color: theme.headerText });
+      slide.addText('Product', { x: x + 0.2, y: y + 0.14, w: colProduct - 0.2, h: 0.3, fontFace: 'Calibri', fontSize: 11, bold: true, color: theme.headerText });
+      slide.addText('Thread', { x: x + colProduct, y: y + 0.14, w: colThread - 0.2, h: 0.3, fontFace: 'Calibri', fontSize: 11, bold: true, color: theme.headerText });
+      slide.addText('Owner', { x: x + colProduct + colThread, y: y + 0.14, w: colOwner - 0.2, h: 0.3, fontFace: 'Calibri', fontSize: 11, bold: true, color: theme.headerText });
+      slide.addText('Status', { x: x + colProduct + colThread + colOwner, y: y + 0.14, w: colStatus - 0.2, h: 0.3, fontFace: 'Calibri', fontSize: 11, bold: true, color: theme.headerText, align: 'center' });
 
-      chunkThreads.slice(0, 7).forEach((t, rowIdx) => {
+      chunkThreads.slice(0, 8).forEach((t, rowIdx) => {
         const yy = y + rowH + rowIdx * rowH;
         slide.addShape(SH_RECT, { x, y: yy, w: card.bodyW, h: rowH, fill: { color: 'FFFFFF' }, line: { color: theme.line, width: 1 } });
-        slide.addText(truncate(t.product || headerProjectCode || 'Product', 22), { x: x + 0.2, y: yy + 0.12, w: colProduct - 0.25, h: 0.34, fontFace: 'Calibri', fontSize: 11, color: theme.subtext });
-        slide.addText(truncate(t.thread, 110), { x: x + colProduct, y: yy + 0.12, w: colThread - 0.25, h: 0.34, fontFace: 'Calibri', fontSize: 11, color: theme.subtext });
-        slide.addText(truncate(getUserName(t.ownerId), 24), { x: x + colProduct + colThread, y: yy + 0.12, w: colOwner - 0.25, h: 0.34, fontFace: 'Calibri', fontSize: 11, color: theme.subtext });
-        slide.addText(String(t.status || '').replace(/_/g, ' '), { x: x + colProduct + colThread + colOwner, y: yy + 0.12, w: colStatus - 0.25, h: 0.34, fontFace: 'Calibri', fontSize: 10, bold: true, color: theme.text });
+        slide.addText(truncate(t.product || headerProjectCode || 'Product', 22), { x: x + 0.2, y: yy + 0.1, w: colProduct - 0.25, h: 0.34, fontFace: 'Calibri', fontSize: 11, color: theme.subtext });
+        slide.addText(truncate(t.thread, 105), { x: x + colProduct, y: yy + 0.1, w: colThread - 0.25, h: 0.34, fontFace: 'Calibri', fontSize: 11, color: theme.subtext });
+        slide.addText(truncate(getUserName(t.ownerId), 24), { x: x + colProduct + colThread, y: yy + 0.1, w: colOwner - 0.25, h: 0.34, fontFace: 'Calibri', fontSize: 11, color: theme.subtext });
+        slide.addText(String(t.status || '').replace(/_/g, ' '), { x: x + colProduct + colThread + colOwner, y: yy + 0.1, w: colStatus - 0.25, h: 0.34, fontFace: 'Calibri', fontSize: 10, bold: true, color: theme.text, align: 'center' });
       });
 
       if (!chunkThreads.length) {
