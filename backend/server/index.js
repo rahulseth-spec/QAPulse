@@ -11,11 +11,17 @@ import { randomBytes, createHash } from 'crypto';
 import User from './models/User.js';
 import WeeklyReport from './models/WeeklyReport.js';
 
-const envLocalPath = path.resolve(process.cwd(), '.env.local');
-if (fs.existsSync(envLocalPath)) {
-  dotenv.config({ path: envLocalPath });
+const envPaths = [
+  path.resolve(process.cwd(), '.env.local'),
+  path.resolve(process.cwd(), '.env'),
+  path.resolve(process.cwd(), '..', '.env.local'),
+  path.resolve(process.cwd(), '..', '.env'),
+];
+for (const p of envPaths) {
+  if (fs.existsSync(p)) {
+    dotenv.config({ path: p });
+  }
 }
-dotenv.config();
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 4000;
 const MONGODB_URI = process.env.MONGODB_URI;
@@ -198,15 +204,110 @@ function requireAuth(req, res, next) {
   }
 }
 
+const DEFAULT_PERMISSIONS_BY_ROLE = {
+  reportee: {
+    dashboard: { view: true, edit: false },
+    weeklyReports: { view: true, edit: false },
+    docs: { view: true, edit: false },
+    userManagement: { view: false, edit: false },
+  },
+  qaOwner: {
+    dashboard: { view: true, edit: false },
+    weeklyReports: { view: true, edit: true },
+    docs: { view: true, edit: false },
+    userManagement: { view: false, edit: false },
+  },
+  manager: {
+    dashboard: { view: true, edit: true },
+    weeklyReports: { view: true, edit: true },
+    docs: { view: true, edit: true },
+    userManagement: { view: true, edit: true },
+  },
+};
+
+function normalizeRole(raw) {
+  const v = String(raw || '').trim().toLowerCase();
+  if (!v) return 'reportee';
+  if (v === 'admin' || v === 'superadmin' || v === 'super_admin') return 'manager';
+  if (v === 'manager') return 'manager';
+  if (v === 'qaowner' || v === 'qa_owner' || v === 'qa owner') return 'qaOwner';
+  if (v === 'reportee') return 'reportee';
+  if (v === 'user') return 'reportee';
+  return 'reportee';
+}
+
+function normalizePermissions(raw, role) {
+  const base = DEFAULT_PERMISSIONS_BY_ROLE[normalizeRole(role)] || DEFAULT_PERMISSIONS_BY_ROLE.reportee;
+  const out = JSON.parse(JSON.stringify(base));
+  if (!raw || typeof raw !== 'object') return out;
+  if (raw.weeklyReport && !raw.weeklyReports) raw.weeklyReports = raw.weeklyReport;
+  for (const [area, perms] of Object.entries(raw)) {
+    if (!perms || typeof perms !== 'object') continue;
+    if (!out[area]) out[area] = { view: false, edit: false };
+    if (typeof perms.view === 'boolean') out[area].view = perms.view;
+    if (typeof perms.edit === 'boolean') out[area].edit = perms.edit;
+  }
+  return out;
+}
+
+function getManagerEmails() {
+  const raw = String(process.env.MANAGER_EMAILS || process.env.ADMIN_EMAILS || '').trim();
+  if (!raw) return [];
+  return raw
+    .split(',')
+    .map(s => s.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function isManagerUser(user) {
+  if (!user) return false;
+  if (normalizeRole(user.role) === 'manager') return true;
+  const email = String(user.email || '').toLowerCase().trim();
+  if (!email) return false;
+  return getManagerEmails().includes(email);
+}
+
+function shouldBeManagerEmail(email) {
+  const lower = String(email || '').toLowerCase().trim();
+  if (!lower) return false;
+  return getManagerEmails().includes(lower);
+}
+
+function can(user, area, action) {
+  if (isManagerUser(user)) return true;
+  const perms = normalizePermissions(user?.permissions, user?.role);
+  return Boolean(perms?.[area]?.[action]);
+}
+
+async function requireManager(req, res, next) {
+  try {
+    if (!dbReady) return res.status(503).json({ error: 'Database not ready' });
+    const user = await User.findById(req.userId).lean();
+    if (!user) return res.status(401).json({ error: 'Invalid auth user' });
+    if (!isManagerUser(user)) return res.status(403).json({ error: 'Forbidden' });
+    req.authUser = user;
+    return next();
+  } catch (err) {
+    console.error('Require manager error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+}
+
 app.get('/api/reports', requireAuth, async (req, res) => {
   try {
     if (!dbReady) return res.status(503).json({ error: 'Database not ready' });
     const user = await User.findById(req.userId).lean();
     if (!user) return res.status(401).json({ error: 'Invalid auth user' });
 
+    if (!can(user, 'weeklyReports', 'view')) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
     const userProjects = Array.isArray(user.projects) ? user.projects.filter(Boolean) : [];
     const projectFilter = userProjects.length ? { projectId: { $in: [...userProjects, ''] } } : null;
-    const query = projectFilter ? { $or: [{ createdBy: req.userId }, projectFilter] } : {};
+    const query = isManagerUser(user)
+      ? {}
+      : (projectFilter ? { $or: [{ createdBy: req.userId }, projectFilter] } : { createdBy: req.userId });
 
     const items = await WeeklyReport.find(query).sort({ updatedAt: -1 }).lean();
     const normalized = items.map(doc => {
@@ -226,16 +327,21 @@ app.get('/api/reports', requireAuth, async (req, res) => {
 app.post('/api/reports', requireAuth, async (req, res) => {
   try {
     if (!dbReady) return res.status(503).json({ error: 'Database not ready' });
+    const user = await User.findById(req.userId).lean();
+    if (!user) return res.status(401).json({ error: 'Invalid auth user' });
+    if (!can(user, 'weeklyReports', 'edit')) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
     const report = req.body || {};
     const reportId = String(report.id || '').trim();
     if (!reportId) return res.status(400).json({ error: 'Report id is required' });
 
     const otherOwner = await WeeklyReport.findOne({ reportId, createdBy: { $ne: req.userId } }).lean();
-    if (otherOwner) {
+    if (otherOwner && !isManagerUser(user)) {
       return res.status(403).json({ error: 'You do not have access to modify this report' });
     }
 
-    const existing = await WeeklyReport.findOne({ reportId, createdBy: req.userId }).lean();
+    const existing = await WeeklyReport.findOne({ reportId }).lean();
     const createdBy = existing?.createdBy || req.userId;
     const updatedBy = req.userId;
     const nextStatus = String(report.status || existing?.status || 'DRAFT');
@@ -278,6 +384,119 @@ app.post('/api/reports', requireAuth, async (req, res) => {
     return res.json({ report: saved.toJSON() });
   } catch (err) {
     console.error('Save report error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/users', requireAuth, requireManager, async (_req, res) => {
+  try {
+    const users = await User.find({}).sort({ createdAt: -1 }).lean();
+    const normalized = users.map(u => {
+      const { _id, __v, passwordHash, googleId, resetPasswordTokenHash, resetPasswordExpiresAt, ...rest } = u;
+      return {
+        id: _id.toString(),
+        ...rest,
+        role: normalizeRole(u.role),
+        permissions: normalizePermissions(u.permissions, u.role),
+      };
+    });
+    return res.json({ users: normalized });
+  } catch (err) {
+    console.error('List users error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/users/invite', requireAuth, requireManager, async (req, res) => {
+  try {
+    if (!dbReady) return res.status(503).json({ error: 'Database not ready' });
+
+    const { email, name, role, projects = [], permissions } = req.body || {};
+    const lower = String(email || '').toLowerCase().trim();
+    const displayName = String(name || '').trim() || 'User';
+    if (!lower) return res.status(400).json({ error: 'email is required' });
+
+    const existing = await User.findOne({ email: lower }).lean();
+    if (existing) return res.status(409).json({ error: 'User already exists' });
+
+    const normalizedRole = normalizeRole(role);
+    const nextProjects = Array.isArray(projects) ? projects.map(String).map(s => s.trim()).filter(Boolean) : [];
+    const nextPermissions = normalizePermissions(permissions || {}, normalizedRole);
+
+    const created = await User.create({
+      name: displayName,
+      email: lower,
+      projects: nextProjects,
+      role: normalizedRole,
+      permissions: nextPermissions,
+    });
+
+    const token = randomBytes(24).toString('hex');
+    created.resetPasswordTokenHash = makeTokenHash(token);
+    created.resetPasswordExpiresAt = new Date(Date.now() + 30 * 60 * 1000);
+    await created.save();
+
+    const expose = String(process.env.EXPOSE_RESET_URL).toLowerCase() === 'true' || DEV_MODE;
+    const url = `${getWebOriginFromReq(req)}/#/reset-password?token=${encodeURIComponent(token)}`;
+
+    if (getMailTransport()) {
+      try {
+        await sendResetPasswordEmail(lower, url);
+      } catch (err) {
+        console.error('Invite email send error:', err);
+      }
+    }
+
+    const { _id, __v, passwordHash, googleId, resetPasswordTokenHash, resetPasswordExpiresAt, ...rest } = created.toJSON();
+    return res.status(201).json({
+      user: {
+        id: _id.toString(),
+        ...rest,
+        role: normalizeRole(created.role),
+        permissions: normalizePermissions(created.permissions, created.role),
+      },
+      ...(expose ? { resetUrl: url } : {}),
+    });
+  } catch (err) {
+    console.error('Invite user error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.patch('/api/users/:id', requireAuth, requireManager, async (req, res) => {
+  try {
+    const id = String(req.params.id || '').trim();
+    if (!id) return res.status(400).json({ error: 'User id is required' });
+
+    const patch = req.body || {};
+    const update = {};
+
+    if (Array.isArray(patch.projects)) {
+      update.projects = patch.projects.map(String).map(s => s.trim()).filter(Boolean);
+    }
+
+    if (typeof patch.role === 'string') {
+      update.role = normalizeRole(patch.role);
+    }
+
+    if (patch.permissions && typeof patch.permissions === 'object') {
+      update.permissions = normalizePermissions(patch.permissions, update.role || patch.role);
+    }
+
+    const saved = await User.findByIdAndUpdate(id, { $set: update }, { new: true }).lean();
+    if (!saved) return res.status(404).json({ error: 'User not found' });
+
+    const { _id, __v, passwordHash, googleId, resetPasswordTokenHash, resetPasswordExpiresAt, ...rest } = saved;
+    return res.json({
+      user: {
+        id: _id.toString(),
+        ...rest,
+        role: normalizeRole(saved.role),
+        permissions: normalizePermissions(saved.permissions, saved.role),
+      }
+    });
+  } catch (err) {
+    console.error('Update user error:', err);
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -488,14 +707,23 @@ app.get('/api/auth/google/callback', async (req, res) => {
       if (existing) {
         existing.googleId = sub || existing.googleId;
         existing.name = name || existing.name;
+        const role = shouldBeManagerEmail(existing.email) ? 'manager' : normalizeRole(existing.role);
+        existing.role = role;
+        existing.permissions = normalizePermissions(existing.permissions, role);
         userRecord = existing;
       } else {
+        if (!shouldBeManagerEmail(email)) {
+          return res.redirect(`${stateData.webOrigin}/#/oauth-callback?error=${encodeURIComponent('Not invited. Ask your manager to invite you.')}`);
+        }
+        const role = 'manager';
         const user = {
           id: `mem-${Date.now()}`,
           name,
           email,
           googleId: sub,
           projects: [],
+          role,
+          permissions: normalizePermissions({}, role),
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
@@ -513,15 +741,24 @@ app.get('/api/auth/google/callback', async (req, res) => {
 
     const existing = await User.findOne({ email });
     if (!existing) {
+      if (!shouldBeManagerEmail(email)) {
+        return res.redirect(`${stateData.webOrigin}/#/oauth-callback?error=${encodeURIComponent('Not invited. Ask your manager to invite you.')}`);
+      }
+      const role = 'manager';
       userRecord = await User.create({
         name,
         email,
         googleId: sub,
         projects: [],
+        role,
+        permissions: normalizePermissions({}, role),
       });
     } else {
       existing.googleId = sub || existing.googleId;
       if (name) existing.name = name;
+      const role = shouldBeManagerEmail(existing.email) ? 'manager' : normalizeRole(existing.role);
+      existing.role = role;
+      existing.permissions = normalizePermissions(existing.permissions, role);
       await existing.save();
       userRecord = existing;
     }
@@ -537,43 +774,7 @@ app.get('/api/auth/google/callback', async (req, res) => {
 
 app.post('/api/auth/signup', async (req, res) => {
   try {
-    const { name, email, password, projects = [] } = req.body;
-    if (!name || !email || !password) {
-      return res.status(400).json({ error: 'name, email, and password are required' });
-    }
-    const lower = email.toLowerCase().trim();
-    if (!dbReady && DEV_MODE) {
-      if (memUsers.has(lower)) {
-        return res.status(409).json({ error: 'Email already registered' });
-      }
-      const passwordHash = await bcrypt.hash(password, 10);
-      const user = {
-        id: `mem-${Date.now()}`,
-        name: name.trim(),
-        email: lower,
-        passwordHash,
-        projects,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      memUsers.set(lower, user);
-      const token = signToken(user.id);
-      return res.status(201).json({ token, user });
-    } else {
-      const existing = await User.findOne({ email: lower });
-      if (existing) {
-        return res.status(409).json({ error: 'Email already registered' });
-      }
-      const passwordHash = await bcrypt.hash(password, 10);
-      const user = await User.create({
-        name: name.trim(),
-        email: lower,
-        passwordHash,
-        projects,
-      });
-      const token = signToken(user._id.toString());
-      return res.status(201).json({ token, user });
-    }
+    return res.status(403).json({ error: 'Signup is disabled. Ask your manager for an invite.' });
   } catch (err) {
     console.error('Signup error:', err);
     const msg = !dbReady && DEV_MODE ? 'Running in DEV_MODE without Mongo. Try again.' : 'Internal server error';
@@ -587,30 +788,47 @@ app.post('/api/auth/login', async (req, res) => {
     if (!email || !password) {
       return res.status(400).json({ error: 'email and password are required' });
     }
-    const lower = email.toLowerCase();
+    const lower = String(email).trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(lower)) {
+      return res.status(400).json({ error: 'Invalid email' });
+    }
+    if (String(password).trim().length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters' });
+    }
     if (!dbReady && DEV_MODE) {
       const user = memUsers.get(lower);
       if (!user) {
-        return res.status(404).json({ error: 'User not found' });
+        return res.status(404).json({ error: 'Invalid email' });
       }
       const ok = await bcrypt.compare(password, user.passwordHash);
       if (!ok) {
-        return res.status(401).json({ error: 'Invalid credentials' });
+        return res.status(401).json({ error: 'Invalid password' });
       }
+      const role = shouldBeManagerEmail(user.email) ? 'manager' : normalizeRole(user.role);
+      user.role = role;
+      user.permissions = normalizePermissions(user.permissions, role);
       const token = signToken(user.id);
       return res.json({ token, user });
     } else {
+      if (!dbReady) {
+        return res.status(503).json({ error: 'Database not ready' });
+      }
       const user = await User.findOne({ email: lower });
       if (!user) {
-        return res.status(404).json({ error: 'User not found' });
+        return res.status(404).json({ error: 'Invalid email' });
       }
       if (!user.passwordHash) {
-        return res.status(401).json({ error: 'Use Google sign-in for this account' });
+        return res.status(401).json({ error: 'Invalid password' });
       }
       const ok = await bcrypt.compare(password, user.passwordHash);
       if (!ok) {
-        return res.status(401).json({ error: 'Invalid credentials' });
+        return res.status(401).json({ error: 'Invalid password' });
       }
+      const role = shouldBeManagerEmail(user.email) ? 'manager' : normalizeRole(user.role);
+      user.role = role;
+      user.permissions = normalizePermissions(user.permissions, role);
+      await user.save();
       const token = signToken(user._id.toString());
       return res.json({ token, user });
     }

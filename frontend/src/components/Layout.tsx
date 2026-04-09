@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { User } from '../types';
+import { User, hasPermission } from '../types';
 
 interface LayoutProps {
   user: User;
@@ -86,11 +86,21 @@ export const Layout: React.FC<LayoutProps> = ({ user, logout, children }) => {
     </svg>
   );
 
+  const UsersIcon = (props: { className?: string }) => (
+    <svg className={props.className} width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+      <path d="M22 21v-2a4 4 0 0 0-3-3.87" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+
   const navItems = [
-    { label: 'Dashboard', path: '/', icon: DashboardIcon },
-    { label: 'Weekly Report', path: '/weekly-reports', icon: ReportIcon },
-    { label: 'FAQ', path: '/docs', icon: DocsIcon },
-  ];
+    hasPermission(user, 'dashboard', 'view') ? { label: 'Dashboard', path: '/', icon: DashboardIcon } : null,
+    hasPermission(user, 'weeklyReports', 'view') ? { label: 'Weekly Report', path: '/weekly-reports', icon: ReportIcon } : null,
+    hasPermission(user, 'docs', 'view') ? { label: 'FAQ', path: '/docs', icon: DocsIcon } : null,
+    hasPermission(user, 'userManagement', 'view') ? { label: 'Users', path: '/users', icon: UsersIcon } : null,
+  ].filter(Boolean) as Array<{ label: string; path: string; icon: (props: { className?: string }) => React.ReactElement }>;
 
   const isReportView = location.pathname.startsWith('/report/');
   const headerTitle = isReportView ? 'Weekly Report' : (navItems.find(i => i.path === location.pathname)?.label || 'System View');

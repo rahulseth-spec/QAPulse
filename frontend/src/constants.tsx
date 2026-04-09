@@ -15,10 +15,10 @@ export const MOCK_PROJECTS: Project[] = [
 ];
 
 export const MOCK_USERS: User[] = [
-  { id: 'u1', name: 'Alice Senior', email: 'alice@company.com', projects: ['p1', 'p2', 'p10'] },
-  { id: 'u2', name: 'Bob QA', email: 'bob@company.com', projects: ['p1', 'p5', 'p6'] },
-  { id: 'u3', name: 'Charlie Admin', email: 'admin@company.com', projects: ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9', 'p10'] },
-  { id: 'u4', name: 'Dave Manager', email: 'dave@company.com', projects: ['p10'] },
+  { id: 'u1', name: 'Alice Senior', email: 'alice@company.com', projects: ['p1', 'p2', 'p10'], role: 'reportee' },
+  { id: 'u2', name: 'Bob QA', email: 'bob@company.com', projects: ['p1', 'p5', 'p6'], role: 'qaOwner' },
+  { id: 'u3', name: 'Charlie Manager', email: 'admin@company.com', projects: ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9', 'p10'], role: 'manager' },
+  { id: 'u4', name: 'Dave Reportee', email: 'dave@company.com', projects: ['p10'], role: 'reportee' },
 ];
 
 export const MOCK_REPORTS: WeeklyReport[] = [

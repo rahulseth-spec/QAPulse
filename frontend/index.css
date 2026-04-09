@@ -83,17 +83,31 @@ body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI
   overflow: hidden;
 }
 
+.softqa-right::before {
+  content: "";
+  position: absolute;
+  inset: -35% -35% -35% -35%;
+  background:
+    radial-gradient(800px 420px at 18% 22%, rgba(255,255,255,0.14), rgba(255,255,255,0.0) 60%),
+    radial-gradient(680px 360px at 85% 70%, rgba(255,255,255,0.12), rgba(255,255,255,0.0) 62%),
+    radial-gradient(520px 300px at 70% 12%, rgba(255,255,255,0.10), rgba(255,255,255,0.0) 58%),
+    linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.0) 55%);
+  transform: rotate(-8deg);
+  opacity: 0.9;
+  pointer-events: none;
+}
+
 .softqa-right::after {
   content: "";
   position: absolute;
-  right: -120px;
-  top: -120px;
-  width: 320px;
-  height: 320px;
+  right: -160px;
+  top: -150px;
+  width: 420px;
+  height: 420px;
   border-radius: 999px;
-  background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.20), rgba(255,255,255,0.0) 60%);
-  filter: blur(0px);
-  opacity: 0.6;
+  background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.18), rgba(255,255,255,0.0) 62%);
+  opacity: 0.7;
+  pointer-events: none;
 }
 
 .softqa-card {
@@ -423,6 +437,21 @@ body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI
   z-index: 1;
 }
 
+.softqa-right-pulse {
+  position: absolute;
+  top: -26px;
+  left: -18px;
+  width: 620px;
+  height: 170px;
+  opacity: 0.28;
+  pointer-events: none;
+}
+
+.softqa-right-inner > *:not(.softqa-right-pulse) {
+  position: relative;
+  z-index: 1;
+}
+
 .softqa-right-headline {
   font-size: 46px;
   line-height: 1.1;
@@ -430,28 +459,56 @@ body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI
   margin: 0;
 }
 
-.softqa-right-quote {
-  margin-top: 22px;
+.softqa-right-subtext {
+  margin-top: 14px;
   font-size: 16px;
   line-height: 1.6;
-  color: rgba(255,255,255,0.85);
+  color: rgba(255,255,255,0.82);
+  max-width: 520px;
 }
 
-.softqa-right-author {
-  margin-top: 14px;
-  font-size: 13px;
-  color: rgba(255,255,255,0.85);
-}
-
-.softqa-logos {
-  margin-top: 40px;
-  padding-top: 24px;
-  border-top: 1px solid rgba(255,255,255,0.20);
+.softqa-right-bullets {
+  margin-top: 28px;
   display: flex;
-  flex-wrap: wrap;
-  gap: 18px 26px;
-  color: rgba(255,255,255,0.80);
+  flex-direction: column;
+  gap: 14px;
+  color: rgba(255,255,255,0.86);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.softqa-right-bullet {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.softqa-right-bullet-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.14);
+  display: grid;
+  place-items: center;
+  color: rgba(255,255,255,0.92);
+  flex: 0 0 auto;
+  margin-top: -2px;
+}
+
+.softqa-right-footer {
+  margin-top: 44px;
+}
+
+.softqa-right-divider {
+  height: 1px;
+  width: 100%;
+  background: rgba(255,255,255,0.20);
+}
+
+.softqa-right-footnote {
+  margin-top: 16px;
   font-size: 12px;
+  color: rgba(255,255,255,0.76);
 }
 
 @media (max-width: 900px) {
@@ -460,6 +517,7 @@ body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI
   .softqa-left { order: 2; padding: 28px 18px; }
   .softqa-card { padding: 24px; }
   .softqa-right-headline { font-size: 32px; }
+  .softqa-right-pulse { width: 520px; height: 150px; top: -22px; left: -14px; }
   .softqa-topbrand { position: static; margin-bottom: 14px; }
 }
 

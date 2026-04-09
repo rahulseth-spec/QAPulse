@@ -41,6 +41,66 @@ export interface User {
   name: string;
   email: string;
   projects: string[];
+  role?: 'manager' | 'qaOwner' | 'reportee' | 'admin' | 'user';
+  permissions?: Partial<Permissions>;
+}
+
+export type PermissionArea = 'dashboard' | 'weeklyReports' | 'docs' | 'userManagement';
+export type PermissionAction = 'view' | 'edit';
+export type Permissions = Record<PermissionArea, { view: boolean; edit: boolean }>;
+
+export function normalizeRole(raw: unknown): 'manager' | 'qaOwner' | 'reportee' {
+  const v = String(raw || '').trim().toLowerCase();
+  if (!v) return 'reportee';
+  if (v === 'admin' || v === 'superadmin' || v === 'super_admin') return 'manager';
+  if (v === 'manager') return 'manager';
+  if (v === 'qaowner' || v === 'qa_owner' || v === 'qa owner') return 'qaOwner';
+  if (v === 'reportee') return 'reportee';
+  if (v === 'user') return 'reportee';
+  return 'reportee';
+}
+
+export const DEFAULT_PERMISSIONS_BY_ROLE: Record<'manager' | 'qaOwner' | 'reportee', Permissions> = {
+  reportee: {
+    dashboard: { view: true, edit: false },
+    weeklyReports: { view: true, edit: false },
+    docs: { view: true, edit: false },
+    userManagement: { view: false, edit: false },
+  },
+  qaOwner: {
+    dashboard: { view: true, edit: false },
+    weeklyReports: { view: true, edit: true },
+    docs: { view: true, edit: false },
+    userManagement: { view: false, edit: false },
+  },
+  manager: {
+    dashboard: { view: true, edit: true },
+    weeklyReports: { view: true, edit: true },
+    docs: { view: true, edit: true },
+    userManagement: { view: true, edit: true },
+  },
+};
+
+export function effectivePermissions(user: User | null | undefined): Permissions {
+  const base: Permissions = JSON.parse(JSON.stringify(DEFAULT_PERMISSIONS_BY_ROLE[normalizeRole(user?.role)]));
+  const raw = user?.permissions as any;
+  if (!raw || typeof raw !== 'object') return base;
+  if (raw.weeklyReport && !raw.weeklyReports) raw.weeklyReports = raw.weeklyReport;
+  for (const [k, v] of Object.entries(raw)) {
+    if (!v || typeof v !== 'object') continue;
+    const key = k as PermissionArea;
+    if (!(key in base)) continue;
+    if (typeof (v as any).view === 'boolean') base[key].view = (v as any).view;
+    if (typeof (v as any).edit === 'boolean') base[key].edit = (v as any).edit;
+  }
+  return base;
+}
+
+export function hasPermission(user: User | null | undefined, area: PermissionArea, action: PermissionAction): boolean {
+  if (!user) return false;
+  if (normalizeRole(user.role) === 'manager') return true;
+  const perms = effectivePermissions(user);
+  return Boolean(perms?.[area]?.[action]);
 }
 
 export interface Project {

@@ -1,12 +1,13 @@
 import React, { useState, useEffect, Component } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
-import { User, WeeklyReport, Project } from './types';
+import { User, WeeklyReport, Project, hasPermission, normalizeRole } from './types';
 import { MOCK_USERS, MOCK_PROJECTS, MOCK_REPORTS } from './constants';
 import DashboardView from './views/DashboardView';
 import EditorView from './views/EditorView';
 import DetailView from './views/DetailView';
 import DocumentationView from './views/DocumentationView';
 import WeeklyReportView from './views/WeeklyReportView';
+import UserManagementView from './views/UserManagementView';
 import { Layout } from './components/Layout';
 
 type RuntimeErrorState = {
@@ -92,20 +93,14 @@ const App: React.FC = () => {
   const [projects] = useState<Project[]>(MOCK_PROJECTS);
   const [runtimeError, setRuntimeError] = useState<RuntimeErrorState | null>(null);
   
-  const [isSignup, setIsSignup] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
   const [error, setError] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [termsAgreed, setTermsAgreed] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [fieldErrors, setFieldErrors] = useState<{ name?: string; email?: string; password?: string; confirmPassword?: string; terms?: string }>({});
-  const [passwordStrength, setPasswordStrength] = useState<'' | 'WEAK' | 'MEDIUM' | 'STRONG'>('');
+  const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
   const [rememberMe, setRememberMe] = useState(false);
   const [capsLockOn, setCapsLockOn] = useState(false);
-  const [oauthBusy, setOauthBusy] = useState(false);
   const [forgotOpen, setForgotOpen] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotMessage, setForgotMessage] = useState('');
@@ -116,14 +111,37 @@ const App: React.FC = () => {
   const [resetMessage, setResetMessage] = useState('');
   const [resetError, setResetError] = useState('');
 
-  useEffect(() => {
+  const readStoredAuth = () => {
     const saved = localStorage.getItem('qapulse_auth');
-    if (saved) {
-      try {
-        const { user } = JSON.parse(saved);
-        setCurrentUser(user);
-      } catch {}
+    if (!saved) return null;
+    try {
+      const parsed = JSON.parse(saved);
+      const token = typeof parsed?.token === 'string' ? parsed.token : null;
+      const user = parsed?.user || null;
+      const persistent = parsed?.persistent === true;
+      const expiresAt = typeof parsed?.expiresAt === 'number' ? parsed.expiresAt : undefined;
+      if (!token || !user) return null;
+      if (persistent) {
+        return { token, user, persistent: true as const };
+      }
+      if (typeof expiresAt !== 'number') {
+        const nextExpiresAt = Date.now() + 24 * 60 * 60 * 1000;
+        localStorage.setItem('qapulse_auth', JSON.stringify({ token, user, expiresAt: nextExpiresAt }));
+        return { token, user, expiresAt: nextExpiresAt };
+      }
+      if (Date.now() > expiresAt) {
+        localStorage.removeItem('qapulse_auth');
+        return null;
+      }
+      return { token, user, expiresAt };
+    } catch {
+      return null;
     }
+  };
+
+  useEffect(() => {
+    const auth = readStoredAuth();
+    if (auth?.user) setCurrentUser(auth.user);
   }, []);
 
   useEffect(() => {
@@ -147,15 +165,41 @@ const App: React.FC = () => {
   }, []);
 
   const getAuthToken = () => {
-    const saved = localStorage.getItem('qapulse_auth');
-    if (!saved) return null;
-    try {
-      const parsed = JSON.parse(saved);
-      return typeof parsed?.token === 'string' ? parsed.token : null;
-    } catch {
-      return null;
-    }
+    const auth = readStoredAuth();
+    return auth?.token || null;
   };
+
+  const setSessionUser = (nextUser: User | null) => {
+    setCurrentUser(nextUser);
+    if (!nextUser) {
+      localStorage.removeItem('qapulse_auth');
+      return;
+    }
+    const existing = readStoredAuth();
+    if (!existing?.token) return;
+    localStorage.setItem(
+      'qapulse_auth',
+      JSON.stringify({
+        token: existing.token,
+        user: nextUser,
+        ...(existing.persistent ? { persistent: true } : {}),
+        ...(typeof existing.expiresAt === 'number' ? { expiresAt: existing.expiresAt } : {}),
+      })
+    );
+  };
+
+  useEffect(() => {
+    if (!currentUser) return;
+    const auth = readStoredAuth();
+    if (!auth?.expiresAt) return;
+    const ms = auth.expiresAt - Date.now();
+    if (ms <= 0) {
+      setSessionUser(null);
+      return;
+    }
+    const id = window.setTimeout(() => setSessionUser(null), ms);
+    return () => window.clearTimeout(id);
+  }, [currentUser?.id]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -205,58 +249,29 @@ const App: React.FC = () => {
   useEffect(() => {
     const { path, params } = parseHashRoute();
     if (path !== '/oauth-callback') return;
+    const oauthError = params.get('error');
+    if (oauthError) {
+      setError(oauthError);
+      window.location.hash = '#/';
+      return;
+    }
     const token = params.get('token');
     const userB64 = params.get('user');
     if (!token || !userB64) return;
     try {
       const user = fromBase64Url(userB64);
       setCurrentUser(user);
-      localStorage.setItem('qapulse_auth', JSON.stringify({ token, user }));
+      localStorage.setItem('qapulse_auth', JSON.stringify({ token, user, expiresAt: Date.now() + 24 * 60 * 60 * 1000 }));
       window.location.hash = '#/';
     } catch {}
   }, []);
 
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  const computeStrength = (pwd: string): '' | 'WEAK' | 'MEDIUM' | 'STRONG' => {
-    if (!pwd) return '';
-    const lengthScore = pwd.length >= 12 ? 2 : pwd.length >= 8 ? 1 : 0;
-    const varietyScore = [/[A-Z]/, /[a-z]/, /[0-9]/, /[^A-Za-z0-9]/].reduce((s, r) => s + (r.test(pwd) ? 1 : 0), 0);
-    const score = lengthScore + varietyScore;
-    if (score >= 5) return 'STRONG';
-    if (score >= 3) return 'MEDIUM';
-    return 'WEAK';
-  };
-
-  useEffect(() => {
-    if (isSignup) {
-      setPasswordStrength(computeStrength(password));
-    } else {
-      setPasswordStrength('');
-    }
-  }, [password, isSignup]);
-
-  useEffect(() => {
-    const remembered = localStorage.getItem('qapulse_remember_email');
-    if (remembered) {
-      setEmail(remembered);
-      setRememberMe(true);
-    }
-  }, []);
 
   const validateLogin = () => {
     const next: typeof fieldErrors = {};
-    if (!emailRegex.test(email.trim())) next.email = 'Enter a valid work email';
-    if (!password.trim()) next.password = 'Password is required';
-    setFieldErrors(next);
-    return Object.keys(next).length === 0;
-  };
-
-  const validateSignup = () => {
-    const next: typeof fieldErrors = {};
-    if (!name.trim()) next.name = 'Full name is required';
-    if (!emailRegex.test(email.trim())) next.email = 'Enter a valid work email';
-    if (!password.trim()) next.password = 'Password is required';
-    if (confirmPassword !== password) next.confirmPassword = 'Passwords do not match';
+    if (!emailRegex.test(email.trim())) next.email = 'Invalid email';
+    if (password.trim().length < 8) next.password = 'Password must be at least 8 characters';
     setFieldErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -278,11 +293,16 @@ const App: React.FC = () => {
         if (parsed.kind === 'text' && isRenderWakingPage(parsed.text)) {
           setError('Backend is waking up on Render. Try again in 20–30 seconds.');
         } else {
-          const msg =
-            (typeof data?.error === 'string' && data.error) ||
-            (parsed.kind === 'text' ? parsed.text : '') ||
-            'Login failed';
-          setError(msg);
+          const msg = (typeof data?.error === 'string' && data.error) || (parsed.kind === 'text' ? parsed.text : '') || 'Login failed';
+          if (msg === 'Invalid email') {
+            setFieldErrors({ email: 'Invalid email' });
+          } else if (msg === 'Invalid password') {
+            setFieldErrors({ password: 'Invalid password' });
+          } else if (msg === 'Password must be at least 8 characters') {
+            setFieldErrors({ password: 'Password must be at least 8 characters' });
+          } else {
+            setError(msg);
+          }
         }
         return;
       }
@@ -300,75 +320,20 @@ const App: React.FC = () => {
         id: data.user.id,
         name: data.user.name,
         email: data.user.email,
-        projects: Array.isArray(data.user.projects) && data.user.projects.length > 0
-          ? data.user.projects
-          : MOCK_PROJECTS.map(p => p.id),
+        projects: Array.isArray(data.user.projects) ? data.user.projects : [],
+        role: normalizeRole(data.user.role),
+        permissions: typeof data.user.permissions === 'object' && data.user.permissions ? data.user.permissions : undefined,
       };
       setCurrentUser(user);
-      localStorage.setItem('qapulse_auth', JSON.stringify({ token: data.token, user }));
-      if (rememberMe) {
-        localStorage.setItem('qapulse_remember_email', email.trim());
-      } else {
-        localStorage.removeItem('qapulse_remember_email');
-      }
-    } catch (err) {
-      setError('Network error. Ensure the API server is running.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleSignup = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    if (!validateSignup()) return;
-    try {
-      setIsLoading(true);
-      const payload = {
-        name: name.trim(),
-        email: email.trim(),
-        password,
-        projects: projects.map(p => p.id),
-      };
-      const res = await fetch(apiUrl('/api/auth/signup'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const parsed = await readJsonOrText(res);
-      const data = parsed.kind === 'json' ? parsed.data : null;
-      if (!res.ok) {
-        if (parsed.kind === 'text' && isRenderWakingPage(parsed.text)) {
-          setError('Backend is waking up on Render. Try again in 20–30 seconds.');
-        } else {
-          const msg =
-            (typeof data?.error === 'string' && data.error) ||
-            (parsed.kind === 'text' ? parsed.text : '') ||
-            'Signup failed';
-          setError(msg);
-        }
-        return;
-      }
-      if (!data?.user || !data?.token) {
-        const msg =
-          parsed.kind === 'text' && isRenderWakingPage(parsed.text)
-            ? 'Backend is waking up on Render. Try again in 20–30 seconds.'
-            : parsed.kind === 'text' && looksLikeHtml(parsed.text)
-              ? `API returned HTML (not JSON). Set VITE_API_BASE_URL to your backend URL. Current: ${API_BASE || '(not set)'}`
-              : `Unexpected API response. Check VITE_API_BASE_URL. Current: ${API_BASE || '(not set)'}`;
-        setError(msg);
-        return;
-      }
-      const user: User = {
-        id: data.user.id,
-        name: data.user.name,
-        email: data.user.email,
-        projects: Array.isArray(data.user.projects) && data.user.projects.length > 0
-          ? data.user.projects
-          : projects.map(p => p.id),
-      };
-      setCurrentUser(user);
-      localStorage.setItem('qapulse_auth', JSON.stringify({ token: data.token, user }));
+      localStorage.setItem(
+        'qapulse_auth',
+        JSON.stringify({
+          token: data.token,
+          user,
+          ...(rememberMe ? { persistent: true } : { expiresAt: Date.now() + 24 * 60 * 60 * 1000 }),
+        })
+      );
+      localStorage.removeItem('qapulse_remember_email');
     } catch (err) {
       setError('Network error. Ensure the API server is running.');
     } finally {
@@ -477,9 +442,7 @@ const App: React.FC = () => {
       }
       setResetMessage(data.message || 'Password updated.');
       setTimeout(() => {
-        setIsSignup(false);
         setPassword('');
-        setConfirmPassword('');
         setResetPassword('');
         setResetConfirm('');
         window.location.hash = '#/';
@@ -509,12 +472,6 @@ const App: React.FC = () => {
         <path d="M6 11h12v9H6v-9Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
       </svg>
     );
-    const UserIcon = (props: { className?: string }) => (
-      <svg className={props.className} width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path d="M20 21a8 8 0 1 0-16 0" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-        <path d="M12 13a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
-      </svg>
-    );
     const EyeIcon = (props: { className?: string }) => (
       <svg className={props.className} width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
         <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
@@ -529,14 +486,13 @@ const App: React.FC = () => {
         <path d="M6.1 6.1C3.7 8.1 2 12 2 12s3.5 7 10 7c1.1 0 2.1-.2 3-.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
     );
-    const GoogleIcon = (props: { className?: string }) => (
-      <svg className={props.className} width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
-        <path fill="#EA4335" d="M12 10.2v3.9h5.4c-.2 1.3-1.5 3.8-5.4 3.8-3.2 0-5.9-2.7-5.9-5.9S8.8 6 12 6c1.8 0 3 .8 3.7 1.4l2.5-2.4C16.7 3.7 14.6 2.7 12 2.7 6.9 2.7 2.8 6.8 2.8 12S6.9 21.3 12 21.3c6.9 0 8.6-4.8 8.6-7.3 0-.5-.1-.9-.1-1.3H12Z"/>
+    const CheckIcon = (props: { className?: string }) => (
+      <svg className={props.className} width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M20 6L9 17l-5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
     );
 
-    const loginEnabled = emailRegex.test(email.trim()) && password.trim().length > 0;
-    const signupEnabled = name.trim().length > 0 && emailRegex.test(email.trim()) && password.trim().length > 0 && confirmPassword === password;
+    const loginEnabled = emailRegex.test(email.trim()) && password.trim().length >= 8;
     const { path: authPath } = parseHashRoute();
 
     return (
@@ -626,32 +582,12 @@ const App: React.FC = () => {
             ) : (
               <>
 
-            <h1 className="softqa-h1">{isSignup ? 'Create your account' : 'Welcome Back!'}</h1>
-            <div className="softqa-subtitle">
-              {isSignup ? 'Create an account to publish weekly QA reports.' : 'Sign in to access your reports and dashboard.'}
-            </div>
+            <h1 className="softqa-h1">Welcome Back!</h1>
+            <div className="softqa-subtitle">Time to pulse-check</div>
 
             {error && <div className="softqa-banner">{error}</div>}
 
-            <form onSubmit={isSignup ? handleSignup : handleLogin} style={{ marginTop: 18 }}>
-              {isSignup && (
-                <div style={{ marginTop: 16 }}>
-                  <label className="softqa-label">Full Name</label>
-                  <div className="softqa-field">
-                    <span className="softqa-left-icon"><UserIcon /></span>
-                    <input
-                      type="text"
-                      className={`softqa-input ${fieldErrors.name ? 'is-invalid' : ''}`}
-                      placeholder="Enter your full name"
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      aria-invalid={!!fieldErrors.name}
-                    />
-                  </div>
-                  {fieldErrors.name && <div className="softqa-error">{fieldErrors.name}</div>}
-                </div>
-              )}
-
+            <form onSubmit={handleLogin} style={{ marginTop: 18 }}>
               <div style={{ marginTop: 16 }}>
                 <label className="softqa-label">Work Email</label>
                 <div className="softqa-field">
@@ -659,7 +595,7 @@ const App: React.FC = () => {
                   <input
                     type="email"
                     className={`softqa-input ${fieldErrors.email ? 'is-invalid' : ''}`}
-                    placeholder="email@company.com"
+                    placeholder="name@convegenius.ai"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     aria-invalid={!!fieldErrors.email}
@@ -681,7 +617,7 @@ const App: React.FC = () => {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     aria-invalid={!!fieldErrors.password}
-                    autoComplete={isSignup ? 'new-password' : 'current-password'}
+                    autoComplete="current-password"
                     onKeyDown={(e) => setCapsLockOn(e.getModifierState && e.getModifierState('CapsLock'))}
                     onKeyUp={(e) => setCapsLockOn(e.getModifierState && e.getModifierState('CapsLock'))}
                     onFocus={(e) => setCapsLockOn(e.getModifierState && e.getModifierState('CapsLock'))}
@@ -697,123 +633,43 @@ const App: React.FC = () => {
                 </div>
                 {fieldErrors.password && <div className="softqa-error">{fieldErrors.password}</div>}
                 {capsLockOn && <div className="softqa-error" style={{ color: '#407B7E' }}>Caps Lock is on</div>}
-                {isSignup && passwordStrength && (
-                  <div style={{ marginTop: 8, fontSize: 12, color: '#6B7280' }}>
-                    Password strength: <span style={{ color: '#407B7E', fontWeight: 600 }}>{passwordStrength}</span>
-                  </div>
-                )}
               </div>
 
-              {isSignup && (
-                <div style={{ marginTop: 16 }}>
-                  <label className="softqa-label">Confirm Password</label>
-                  <div className="softqa-field">
-                    <span className="softqa-left-icon"><LockIcon /></span>
-                    <input
-                      type={showPassword ? 'text' : 'password'}
-                      className={`softqa-input ${fieldErrors.confirmPassword ? 'is-invalid' : ''}`}
-                      placeholder="Repeat your password"
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      aria-invalid={!!fieldErrors.confirmPassword}
-                      autoComplete="new-password"
-                    />
-                  </div>
-                  {fieldErrors.confirmPassword && <div className="softqa-error">{fieldErrors.confirmPassword}</div>}
-                </div>
-              )}
-
-              {!isSignup ? (
-                <div className="softqa-meta-row">
-                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                    <input type="checkbox" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} />
-                    <span>Remember me</span>
-                  </label>
-                  <button
-                    type="button"
-                    className="softqa-link"
-                    onClick={() => {
-                      setForgotEmail(email.trim());
-                      setForgotMessage('');
-                      setForgotResetUrl('');
-                      setForgotIsError(false);
-                      setForgotOpen(true);
-                    }}
-                  >
-                    Forgot Password?
-                  </button>
-                </div>
-              ) : (
-                <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, color: '#6B7280' }}>
-                  <input id="terms" type="checkbox" checked={termsAgreed} onChange={(e) => setTermsAgreed(e.target.checked)} />
-                  <label htmlFor="terms">
-                    I agree to <button type="button" className="softqa-link">Terms</button> & <button type="button" className="softqa-link">Privacy</button>
-                  </label>
-                </div>
-              )}
+              <div className="softqa-meta-row">
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  <input type="checkbox" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} />
+                  <span>Remember me</span>
+                </label>
+                <button
+                  type="button"
+                  className="softqa-link"
+                  onClick={() => {
+                    setForgotEmail(email.trim());
+                    setForgotMessage('');
+                    setForgotResetUrl('');
+                    setForgotIsError(false);
+                    setForgotOpen(true);
+                  }}
+                >
+                  Forgot password?
+                </button>
+              </div>
 
               <div style={{ marginTop: 18 }}>
                 <button
                   type="submit"
                   className="softqa-primary"
-                  disabled={(isSignup ? !signupEnabled : !loginEnabled) || isLoading}
+                  disabled={!loginEnabled || isLoading}
                   aria-busy={isLoading}
-                  title={(isSignup ? !signupEnabled : !loginEnabled) ? 'Complete required fields to continue' : ''}
+                  title={!loginEnabled ? 'Complete required fields to continue' : ''}
                 >
                   {isLoading && <span className="softqa-spinner" />}
-                  <span>{isLoading ? (isSignup ? 'Creating account…' : 'Signing in…') : (isSignup ? 'Create Account' : 'Sign In')}</span>
-                </button>
-              </div>
-
-              <div className="softqa-divider">
-                <div className="softqa-divider-line" />
-                <div>OR</div>
-                <div className="softqa-divider-line" />
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <button
-                  type="button"
-                  className="softqa-oauth"
-                  disabled={oauthBusy}
-                  onClick={async () => {
-                    setError('');
-                    setOauthBusy(true);
-                    try {
-                      const res = await fetch(apiUrl('/api/auth/google/status'));
-                      const parsed = await readJsonOrText(res);
-                      const data = parsed.kind === 'json' ? parsed.data : null;
-                      if (!res.ok || !data?.enabled) {
-                        const missing = Array.isArray(data?.missing) ? data.missing.join(', ') : '';
-                        setError(missing ? `Google sign-in is not configured (${missing}).` : 'Google sign-in is not configured.');
-                        setOauthBusy(false);
-                        return;
-                      }
-                      window.location.assign(apiUrl('/api/auth/google'));
-                    } catch {
-                      setError('Network error. Ensure the API server is running.');
-                      setOauthBusy(false);
-                    }
-                  }}
-                >
-                  <GoogleIcon />
-                  <span>Continue with Google</span>
+                  <span>{isLoading ? 'Signing in…' : 'Sign In'}</span>
                 </button>
               </div>
 
               <div style={{ marginTop: 18, fontSize: 13, color: '#6B7280', textAlign: 'center' }}>
-                {isSignup ? 'Already have an account? ' : "Don’t have an account? "}
-                <button
-                  type="button"
-                  className="softqa-link"
-                  onClick={() => {
-                    setIsSignup(!isSignup);
-                    setError('');
-                    setFieldErrors({});
-                  }}
-                >
-                  {isSignup ? 'Sign In' : 'Sign Up'}
-                </button>
+                Don’t have an account? Ask your manager to invite you.
               </div>
             </form>
 
@@ -830,7 +686,7 @@ const App: React.FC = () => {
                         type="email"
                         className="softqa-input"
                         style={{ paddingLeft: 16 }}
-                        placeholder="email@company.com"
+                        placeholder="name@convegenius.ai"
                         value={forgotEmail}
                         onChange={(e) => setForgotEmail(e.target.value)}
                         autoComplete="email"
@@ -880,17 +736,37 @@ const App: React.FC = () => {
 
         <div className="softqa-right">
           <div className="softqa-right-inner">
-            <h2 className="softqa-right-headline">Track Weekly QA Health with Confidence</h2>
-            <div className="softqa-right-quote">
-              “QAPulse keeps our weekly QA reporting consistent and decision-ready across projects.”
+            <svg className="softqa-right-pulse" viewBox="0 0 640 180" fill="none" aria-hidden="true" preserveAspectRatio="none">
+              <path
+                d="M0 110H120L150 70L180 140L210 95H275L305 35L345 160L380 85H640"
+                stroke="rgba(255,255,255,0.55)"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+
+            <h2 className="softqa-right-headline">Track Weekly QA Health</h2>
+            <div className="softqa-right-subtext">Draft, publish, and search QA snapshots across projects.</div>
+
+            <div className="softqa-right-bullets" role="list">
+              <div className="softqa-right-bullet" role="listitem">
+                <span className="softqa-right-bullet-icon" aria-hidden="true"><CheckIcon /></span>
+                <span>Standard weekly reporting template</span>
+              </div>
+              <div className="softqa-right-bullet" role="listitem">
+                <span className="softqa-right-bullet-icon" aria-hidden="true"><CheckIcon /></span>
+                <span>Risks, blockers, and follow-ups captured clearly</span>
+              </div>
+              <div className="softqa-right-bullet" role="listitem">
+                <span className="softqa-right-bullet-icon" aria-hidden="true"><CheckIcon /></span>
+                <span>Search by project, month, and week</span>
+              </div>
             </div>
-            <div className="softqa-right-author">Senior QA Lead</div>
-            <div className="softqa-logos">
-              <span>Discord</span>
-              <span>Mailchimp</span>
-              <span>Grammarly</span>
-              <span>Square</span>
-              <span>Dropbox</span>
+
+            <div className="softqa-right-footer">
+              <div className="softqa-right-divider" aria-hidden="true" />
+              <div className="softqa-right-footnote">Internal tool for ConveGenius QA teams</div>
             </div>
           </div>
         </div>
@@ -900,17 +776,38 @@ const App: React.FC = () => {
 
   return (
     <Router>
-      <Layout user={currentUser} logout={() => { setCurrentUser(null); localStorage.removeItem('qapulse_auth'); setIsSignup(false); setEmail(''); setName(''); setPassword(''); setError(''); }}>
+      <Layout user={currentUser} logout={() => { setSessionUser(null); setEmail(''); setPassword(''); setRememberMe(false); setError(''); }}>
         <ErrorBoundary onError={(err) => setRuntimeError(err)}>
+          {(() => {
+            const token = getAuthToken() || '';
+            const home =
+              hasPermission(currentUser, 'dashboard', 'view') ? '/' :
+              hasPermission(currentUser, 'weeklyReports', 'view') ? '/weekly-reports' :
+              hasPermission(currentUser, 'docs', 'view') ? '/docs' :
+              hasPermission(currentUser, 'userManagement', 'view') ? '/users' :
+              '/';
+            const visibleProjects = projects.filter(p => currentUser.projects.includes(p.id));
+
+            const deny = (title: string) => (
+              <div className="bg-white border border-slate-200 rounded-[20px] shadow-sm p-8">
+                <div className="text-[16px] font-bold text-slate-900">Access denied</div>
+                <div className="mt-2 text-[13px] text-slate-600 font-semibold">{title}</div>
+              </div>
+            );
+
+            return (
           <Routes>
-            <Route path="/" element={<DashboardView reports={reports} projects={projects} user={currentUser} users={users} />} />
-            <Route path="/weekly-reports" element={<WeeklyReportView reports={reports} projects={projects} user={currentUser} users={users} onUpdate={handleAddReport} onDelete={handleDeleteReport} />} />
-            <Route path="/create" element={<EditorView onSave={handleAddReport} user={currentUser} projects={projects} users={users} />} />
-            <Route path="/edit/:id" element={<EditorView onSave={handleAddReport} user={currentUser} projects={projects} users={users} reports={reports} />} />
-            <Route path="/report/:id" element={<DetailView reports={reports} projects={projects} user={currentUser} users={users} onUpdate={handleAddReport} onDelete={handleDeleteReport} />} />
-            <Route path="/docs" element={<DocumentationView />} />
-            <Route path="*" element={<Navigate to="/" />} />
+            <Route path="/" element={hasPermission(currentUser, 'dashboard', 'view') ? <DashboardView reports={reports} projects={visibleProjects} user={currentUser} users={users} /> : <Navigate to={home} />} />
+            <Route path="/weekly-reports" element={hasPermission(currentUser, 'weeklyReports', 'view') ? <WeeklyReportView reports={reports} projects={visibleProjects} user={currentUser} users={users} onUpdate={handleAddReport} onDelete={handleDeleteReport} /> : deny('You do not have permission to view Weekly Reports.')} />
+            <Route path="/create" element={hasPermission(currentUser, 'weeklyReports', 'edit') ? <EditorView onSave={handleAddReport} user={currentUser} projects={visibleProjects} users={users} /> : deny('You do not have permission to create or edit reports.')} />
+            <Route path="/edit/:id" element={hasPermission(currentUser, 'weeklyReports', 'edit') ? <EditorView onSave={handleAddReport} user={currentUser} projects={visibleProjects} users={users} reports={reports} /> : deny('You do not have permission to create or edit reports.')} />
+            <Route path="/report/:id" element={hasPermission(currentUser, 'weeklyReports', 'view') ? <DetailView reports={reports} projects={visibleProjects} user={currentUser} users={users} onUpdate={handleAddReport} onDelete={handleDeleteReport} /> : deny('You do not have permission to view reports.')} />
+            <Route path="/docs" element={hasPermission(currentUser, 'docs', 'view') ? <DocumentationView /> : deny('You do not have permission to view FAQ.')} />
+            <Route path="/users" element={token && hasPermission(currentUser, 'userManagement', 'view') ? <UserManagementView user={currentUser} projects={projects} token={token} apiUrl={apiUrl} onSelfUpdated={(u) => setSessionUser(u)} /> : deny('You do not have permission to manage users.')} />
+            <Route path="*" element={<Navigate to={home} />} />
           </Routes>
+            );
+          })()}
         </ErrorBoundary>
 
         {runtimeError && (

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { WeeklyReport, Project, ReportStatus, User } from '../types';
+import { WeeklyReport, Project, ReportStatus, User, hasPermission, normalizeRole } from '../types';
 import { formatISODate, getMonthName } from '../utils';
 import { ThemedSelect, type ThemedSelectOption } from '../components/ThemedSelect';
 
@@ -16,6 +16,9 @@ interface WeeklyReportViewProps {
 
 const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({ reports, projects, user, users, onUpdate, onDelete }) => {
   const navigate = useNavigate();
+  const canEdit = hasPermission(user, 'weeklyReports', 'edit');
+  const isManager = normalizeRole(user.role) === 'manager';
+  const canCreateProjectWise = canEdit && projects.length > 0;
 
   const KebabIcon = (props: { className?: string }) => (
     <svg className={props.className} width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -50,6 +53,8 @@ const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({ reports, projects, 
   const importModeRef = useRef<'PROJECT' | 'OVERALL'>('PROJECT');
 
   const triggerImport = (mode: 'PROJECT' | 'OVERALL') => {
+    if (!canEdit) return;
+    if (mode === 'PROJECT' && projects.length === 0) return;
     importModeRef.current = mode;
     importInputRef.current?.click();
   };
@@ -206,7 +211,7 @@ const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({ reports, projects, 
             >
               View
             </button>
-            {openReport.createdBy === user.id && (
+            {canEdit && (openReport.createdBy === user.id || isManager) && (
               <button
                 type="button"
                 onClick={() => { setOpenMenuId(null); setMenuPos(null); navigate(`/edit/${openReport.id}`); }}
@@ -229,7 +234,7 @@ const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({ reports, projects, 
             >
               Download PPT
             </button>
-            {openReport.createdBy === user.id && (
+            {canEdit && (openReport.createdBy === user.id || isManager) && (
               <button
                 type="button"
                 onClick={() => {
@@ -269,12 +274,16 @@ const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({ reports, projects, 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 min-w-[280px]">
                 <button
                   type="button"
+                  disabled={!canCreateProjectWise}
                   onClick={() => {
+                    if (!canCreateProjectWise) return;
                     const projectId = filters.projectId || projects[0]?.id || '';
                     const params = new URLSearchParams(projectId ? { projectId } : {}).toString();
                     navigate(params ? `/create?${params}` : '/create');
                   }}
-                  className="h-11 w-full px-4 rounded-xl bg-white text-[#073D44] font-semibold text-[13px] shadow-sm hover:bg-white/90 transition-colors inline-flex items-center justify-center gap-2"
+                  className={`h-11 w-full px-4 rounded-xl font-semibold text-[13px] shadow-sm transition-colors inline-flex items-center justify-center gap-2 ${
+                    canCreateProjectWise ? 'bg-white text-[#073D44] hover:bg-white/90' : 'bg-white/50 text-white/70 cursor-not-allowed'
+                  }`}
                 >
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                     <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
@@ -284,8 +293,11 @@ const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({ reports, projects, 
 
                 <button
                   type="button"
+                  disabled={!canEdit}
                   onClick={() => navigate('/create?mode=overall')}
-                  className="h-11 w-full px-4 rounded-xl bg-white text-[#073D44] font-semibold text-[13px] shadow-sm hover:bg-white/90 transition-colors inline-flex items-center justify-center gap-2"
+                  className={`h-11 w-full px-4 rounded-xl font-semibold text-[13px] shadow-sm transition-colors inline-flex items-center justify-center gap-2 ${
+                    canEdit ? 'bg-white text-[#073D44] hover:bg-white/90' : 'bg-white/50 text-white/70 cursor-not-allowed'
+                  }`}
                 >
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                     <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
@@ -297,7 +309,9 @@ const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({ reports, projects, 
                   type="button"
                   aria-label="Import (Project wise)"
                   onClick={() => triggerImport('PROJECT')}
-                  className="h-11 w-full px-4 rounded-xl bg-white/12 text-white font-semibold text-[13px] border border-white/20 hover:bg-white/18 transition-colors inline-flex items-center justify-center gap-2"
+                  className={`h-11 w-full px-4 rounded-xl text-white font-semibold text-[13px] border border-white/20 transition-colors inline-flex items-center justify-center gap-2 ${
+                    canCreateProjectWise ? 'bg-white/12 hover:bg-white/18' : 'bg-white/5 text-white/60 cursor-not-allowed'
+                  }`}
                 >
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                     <path
@@ -322,7 +336,9 @@ const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({ reports, projects, 
                   type="button"
                   aria-label="Import (All Projects)"
                   onClick={() => triggerImport('OVERALL')}
-                  className="h-11 w-full px-4 rounded-xl bg-white/12 text-white font-semibold text-[13px] border border-white/20 hover:bg-white/18 transition-colors inline-flex items-center justify-center gap-2"
+                  className={`h-11 w-full px-4 rounded-xl text-white font-semibold text-[13px] border border-white/20 transition-colors inline-flex items-center justify-center gap-2 ${
+                    canEdit ? 'bg-white/12 hover:bg-white/18' : 'bg-white/5 text-white/60 cursor-not-allowed'
+                  }`}
                 >
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                     <path

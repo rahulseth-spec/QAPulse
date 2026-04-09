@@ -9,6 +9,8 @@ const UserSchema = new mongoose.Schema(
     resetPasswordTokenHash: { type: String, required: false },
     resetPasswordExpiresAt: { type: Date, required: false },
     projects: { type: [String], default: [] },
+    role: { type: String, default: 'reportee' },
+    permissions: { type: Object, default: {} },
   },
   { timestamps: true }
 );

@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { WeeklyReport, Project, User, ReportStatus, HealthStatus, LoadStatus, GoalRow, ThreadRow, ExecutionReadinessSlide } from '../types';
+import { WeeklyReport, Project, User, ReportStatus, HealthStatus, LoadStatus, GoalRow, ThreadRow, ExecutionReadinessSlide, hasPermission, normalizeRole } from '../types';
 import { formatLocalISODate, getMonthName, parseISODateToLocal } from '../utils';
 
 interface DetailProps {
@@ -51,6 +51,7 @@ const DetailView: React.FC<DetailProps> = ({ reports, projects, user, users, onU
         },
       ];
   const isOwner = report.createdBy === user.id;
+  const canEdit = hasPermission(user, 'weeklyReports', 'edit') && (isOwner || normalizeRole(user.role) === 'manager');
 
   useEffect(() => {
     const state = location.state as any;
@@ -174,7 +175,7 @@ const DetailView: React.FC<DetailProps> = ({ reports, projects, user, users, onU
   };
 
   const handlePublish = () => {
-    if (!isOwner) return;
+    if (!canEdit) return;
     if (!isPublishable(report)) return;
     onUpdate({ ...report, status: ReportStatus.PUBLISHED, publishedBy: user.id, updatedBy: user.id, updatedAt: new Date().toISOString() });
   };
@@ -574,7 +575,7 @@ const DetailView: React.FC<DetailProps> = ({ reports, projects, user, users, onU
               >
                 Download PPT
               </button>
-              {isOwner && (
+              {canEdit && (
                 <button
                   onClick={() => { if(window.confirm('Delete this report?')) { onDelete(report.id); navigate('/'); }}}
                   className="h-10 px-4 rounded-xl bg-white text-red-700 font-semibold text-[13px] hover:bg-white/90 transition-colors"
