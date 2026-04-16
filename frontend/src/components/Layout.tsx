@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { User, hasPermission } from '../types';
 
 interface LayoutProps {
@@ -10,7 +10,6 @@ interface LayoutProps {
 
 export const Layout: React.FC<LayoutProps> = ({ user, logout, children }) => {
   const location = useLocation();
-  const navigate = useNavigate();
 
   const [isSidebarCollapsed, setIsSidebarCollapsed] = React.useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
@@ -36,34 +35,6 @@ export const Layout: React.FC<LayoutProps> = ({ user, logout, children }) => {
     </svg>
   );
 
-  const ReportIcon = (props: { className?: string }) => (
-    <svg className={props.className} width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M7 3h8l4 4v14H7V3Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
-      <path d="M15 3v4h4" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
-      <path d="M9 11h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      <path d="M9 15h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-
-  const DocsIcon = (props: { className?: string }) => (
-    <svg className={props.className} width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M9.5 9a2.5 2.5 0 0 1 5 0c0 2-2.5 2-2.5 4"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path d="M12 17h.01" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-    </svg>
-  );
-
   const SignOutIcon = (props: { className?: string }) => (
     <svg className={props.className} width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path d="M10 7V5a2 2 0 0 1 2-2h7v18h-7a2 2 0 0 1-2-2v-2" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
@@ -80,12 +51,6 @@ export const Layout: React.FC<LayoutProps> = ({ user, logout, children }) => {
     </svg>
   );
 
-  const BackIcon = (props: { className?: string }) => (
-    <svg className={props.className} width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M15 18l-6-6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-
   const UsersIcon = (props: { className?: string }) => (
     <svg className={props.className} width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
@@ -95,15 +60,27 @@ export const Layout: React.FC<LayoutProps> = ({ user, logout, children }) => {
     </svg>
   );
 
+  const RolesIcon = (props: { className?: string }) => (
+    <svg className={props.className} width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 3l7 4v5c0 4.4-2.8 7.9-7 9-4.2-1.1-7-4.6-7-9V7l7-4Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+      <path d="M9.5 12l1.7 1.7 3.3-3.4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+
+  const ProjectsIcon = (props: { className?: string }) => (
+    <svg className={props.className} width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+    </svg>
+  );
+
   const navItems = [
     hasPermission(user, 'dashboard', 'view') ? { label: 'Dashboard', path: '/', icon: DashboardIcon } : null,
-    hasPermission(user, 'weeklyReports', 'view') ? { label: 'Weekly Report', path: '/weekly-reports', icon: ReportIcon } : null,
-    hasPermission(user, 'docs', 'view') ? { label: 'FAQ', path: '/docs', icon: DocsIcon } : null,
+    hasPermission(user, 'projectManagement', 'view') ? { label: 'Projects', path: '/projects', icon: ProjectsIcon } : null,
     hasPermission(user, 'userManagement', 'view') ? { label: 'Users', path: '/users', icon: UsersIcon } : null,
+    hasPermission(user, 'roleManagement', 'view') ? { label: 'Roles', path: '/roles', icon: RolesIcon } : null,
   ].filter(Boolean) as Array<{ label: string; path: string; icon: (props: { className?: string }) => React.ReactElement }>;
 
-  const isReportView = location.pathname.startsWith('/report/');
-  const headerTitle = isReportView ? 'Weekly Report' : (navItems.find(i => i.path === location.pathname)?.label || 'System View');
+  const headerTitle = navItems.find(i => i.path === '/' ? location.pathname === '/' : location.pathname.startsWith(i.path))?.label || 'Dashboard';
 
   return (
     <div className="flex h-screen overflow-hidden bg-[#F6F7F8]">
@@ -178,16 +155,6 @@ export const Layout: React.FC<LayoutProps> = ({ user, logout, children }) => {
       <main className="flex-1 flex flex-col overflow-hidden relative">
         <header className="h-16 bg-[#CFE8E8]/95 backdrop-blur border-b border-[#073D44]/20 flex items-center justify-between px-6 lg:px-12 sticky top-0 z-10 shrink-0">
           <div className="flex items-center gap-4">
-            {isReportView && (
-              <button
-                type="button"
-                aria-label="Back"
-                onClick={() => navigate(-1)}
-                className="w-9 h-9 rounded-xl bg-white/65 border border-[#073D44]/25 text-[#073D44] hover:bg-white/80 transition-colors flex items-center justify-center"
-              >
-                <BackIcon />
-              </button>
-            )}
             <h2 className="text-[14px] font-semibold text-[#073D44] tracking-tight">
               {headerTitle}
             </h2>

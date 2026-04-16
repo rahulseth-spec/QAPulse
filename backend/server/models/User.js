@@ -11,6 +11,16 @@ const UserSchema = new mongoose.Schema(
     projects: { type: [String], default: [] },
     role: { type: String, default: 'reportee' },
     permissions: { type: Object, default: {} },
+    // Status and session management
+    status: { type: String, enum: ['active', 'suspended', 'archived'], default: 'active' },
+    token_version: { type: Number, default: 0 },
+    // Role reference (new system)
+    role_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Role', default: null },
+    // Audit fields
+    created_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    suspended_at: { type: Date, default: null },
+    archived_at: { type: Date, default: null },
+    last_login_at: { type: Date, default: null },
   },
   { timestamps: true }
 );

@@ -36,6 +36,12 @@ export enum OwnerRole {
   OTHER = 'OTHER'
 }
 
+export type UserStatus = 'active' | 'suspended' | 'archived';
+export type PermissionLevel = 'view' | 'edit' | 'no_access';
+export type RoleStatus = 'active' | 'archived';
+export type RolePermissionArea = 'dashboard' | 'userManagement' | 'roleManagement';
+export type RolePermissions = Record<RolePermissionArea, PermissionLevel>;
+
 export interface User {
   id: string;
   name: string;
@@ -43,9 +49,31 @@ export interface User {
   projects: string[];
   role?: 'manager' | 'qaOwner' | 'reportee' | 'admin' | 'user';
   permissions?: Partial<Permissions>;
+  status?: UserStatus;
+  role_id?: string | null;
+  role_name?: string | null;
+  last_login_at?: string | null;
+  suspended_at?: string | null;
+  archived_at?: string | null;
+  created_by?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
-export type PermissionArea = 'dashboard' | 'weeklyReports' | 'docs' | 'userManagement';
+export interface Role {
+  id: string;
+  name: string;
+  description: string;
+  permissions: RolePermissions;
+  status: RoleStatus;
+  created_by: string | null;
+  archived_at: string | null;
+  createdAt: string;
+  updatedAt: string;
+  user_count?: number;
+}
+
+export type PermissionArea = 'dashboard' | 'weeklyReports' | 'docs' | 'userManagement' | 'roleManagement' | 'projectManagement';
 export type PermissionAction = 'view' | 'edit';
 export type Permissions = Record<PermissionArea, { view: boolean; edit: boolean }>;
 
@@ -66,18 +94,24 @@ export const DEFAULT_PERMISSIONS_BY_ROLE: Record<'manager' | 'qaOwner' | 'report
     weeklyReports: { view: true, edit: false },
     docs: { view: true, edit: false },
     userManagement: { view: false, edit: false },
+    roleManagement: { view: false, edit: false },
+    projectManagement: { view: false, edit: false },
   },
   qaOwner: {
     dashboard: { view: true, edit: false },
     weeklyReports: { view: true, edit: true },
     docs: { view: true, edit: false },
     userManagement: { view: false, edit: false },
+    roleManagement: { view: false, edit: false },
+    projectManagement: { view: true, edit: false },
   },
   manager: {
     dashboard: { view: true, edit: true },
     weeklyReports: { view: true, edit: true },
     docs: { view: true, edit: true },
     userManagement: { view: true, edit: true },
+    roleManagement: { view: true, edit: true },
+    projectManagement: { view: true, edit: true },
   },
 };
 
@@ -204,9 +238,113 @@ export interface WeeklyReport {
   updatedAt: string;
 }
 
-export interface AuditTrail {
-  reportId: string;
-  userId: string;
-  action: string;
-  timestamp: string;
+// ─── Project Management Types ────────────────────────────────────────────────
+
+export type ProjectStatus = 'draft' | 'active' | 'on_hold' | 'completed';
+export type ProjectRole = 'project_manager' | 'qa_lead' | 'tester';
+export type MemberStatus = 'active' | 'removed';
+
+export type ReqType = 'functional' | 'non_functional' | 'ui' | 'performance';
+export type ReqPriority = 'high' | 'medium' | 'low';
+export type ReqStatus = 'draft' | 'under_review' | 'approved' | 'rejected';
+
+export interface ProjectAttachment {
+  url: string;
+  filename: string;
+  size_bytes: number;
+  mimetype: string;
 }
+
+export interface TcCount {
+  total: number;
+  pass: number;
+  fail: number;
+  pending: number;
+}
+
+export interface ProjectMember {
+  id: string;
+  project_id: string;
+  user_id: string;
+  project_role: ProjectRole;
+  assigned_by: string | null;
+  assigned_at: string;
+  status: MemberStatus;
+  removed_at: string | null;
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    status: string;
+  } | null;
+}
+
+export interface ProjectEntity {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string;
+  start_date: string | null;
+  end_date: string | null;
+  status: ProjectStatus;
+  tags: string[];
+  archived: boolean;
+  archived_at: string | null;
+  req_count: number;
+  module_count: number;
+  tc_count: number;
+  member_count?: number;
+  created_by: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Requirement {
+  id: string;
+  req_id: string;
+  req_seq: number;
+  project_id: string;
+  title: string;
+  description: string;
+  type: ReqType;
+  priority: ReqPriority;
+  status: ReqStatus;
+  attachment: ProjectAttachment | null;
+  coverage: number;
+  archived: boolean;
+  archived_at: string | null;
+  created_by: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ModuleEntity {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string;
+  linked_req_ids: string[];
+  parent_module_id: string | null;
+  depth: number;
+  tc_count: TcCount;
+  archived: boolean;
+  archived_at: string | null;
+  created_by: string | null;
+  createdAt: string;
+  updatedAt: string;
+  sub_modules?: ModuleEntity[];
+}
+
+export const PROJECT_STATUS_TRANSITIONS: Record<ProjectStatus, ProjectStatus[]> = {
+  draft: ['active'],
+  active: ['on_hold', 'completed'],
+  on_hold: ['active', 'completed'],
+  completed: [],
+};
+
+export const REQ_STATUS_TRANSITIONS: Record<ReqStatus, ReqStatus[]> = {
+  draft: ['under_review'],
+  under_review: ['approved', 'rejected'],
+  rejected: ['draft'],
+  approved: ['under_review'],
+};

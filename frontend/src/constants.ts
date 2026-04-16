@@ -1,4 +1,3 @@
-import React from 'react';
 import { User, Project, ReportStatus, WeeklyReport, HealthStatus, ConfidenceLevel, LoadStatus, ThreadStatus, OwnerRole } from './types';
 
 export const MOCK_PROJECTS: Project[] = [
@@ -35,29 +34,19 @@ export const MOCK_REPORTS: WeeklyReport[] = [
     status: ReportStatus.PUBLISHED,
     goals: [
       { goal: 'Fix UI regressions', successMetric: 'Zero open P0s', health: HealthStatus.GREEN, confidence: ConfidenceLevel.HIGH },
-      { goal: 'Load testing API', successMetric: '1000 req/sec sustained', health: HealthStatus.YELLOW, confidence: ConfidenceLevel.MED }
+      { goal: 'Load testing API', successMetric: '1000 req/sec sustained', health: HealthStatus.YELLOW, confidence: ConfidenceLevel.MED },
     ],
     capacity: { plannedHours: 120, committedHours: 130, surplusDeficitHours: -10, loadStatus: LoadStatus.OVERLOADED },
     strength: { activeContributors: 8, criticalRoleGaps: false },
-    decisions: [
-      { decisionText: 'Switch to Postgres for scale', ownerRole: OwnerRole.QA, dueDate: '2024-05-25' }
-    ],
+    decisions: [{ decisionText: 'Switch to Postgres for scale', ownerRole: OwnerRole.QA, dueDate: '2024-05-25' }],
     sprintHealth: { startDate: '2024-05-13', goalClarity: HealthStatus.GREEN, readiness: HealthStatus.GREEN },
-    uedHealth: {
-      lastDiscussion: '2024-05-10',
-      daysSinceLast: '3',
-      nextScheduled: '2024-05-20',
-      dataAvailable: true,
-      status: HealthStatus.GREEN
-    },
+    uedHealth: { lastDiscussion: '2024-05-10', daysSinceLast: '3', nextScheduled: '2024-05-20', dataAvailable: true, status: HealthStatus.GREEN },
     bottlenecks: ['Staging env instability'],
-    threads: [
-      { thread: 'Database optimization research', ownerId: 'u2', status: ThreadStatus.IN_PROGRESS }
-    ],
+    threads: [{ thread: 'Database optimization research', ownerId: 'u2', status: ThreadStatus.IN_PROGRESS }],
     createdBy: 'u2',
     updatedBy: 'u2',
     publishedBy: 'u1',
     createdAt: '2024-05-18T10:00:00Z',
-    updatedAt: '2024-05-19T14:00:00Z'
-  }
+    updatedAt: '2024-05-19T14:00:00Z',
+  },
 ];

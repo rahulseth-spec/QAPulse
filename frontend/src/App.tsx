@@ -1,13 +1,13 @@
 import React, { useState, useEffect, Component } from 'react';
-import { HashRouter as Router, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
-import { User, WeeklyReport, Project, hasPermission, normalizeRole } from './types';
-import { MOCK_USERS, MOCK_PROJECTS, MOCK_REPORTS } from './constants';
-import DashboardView from './views/DashboardView';
-import EditorView from './views/EditorView';
-import DetailView from './views/DetailView';
-import DocumentationView from './views/DocumentationView';
-import WeeklyReportView from './views/WeeklyReportView';
-import UserManagementView from './views/UserManagementView';
+import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { User, Project, hasPermission, normalizeRole } from './types';
+import { MOCK_PROJECTS } from './constants';
+import Dashboard from './pages/Dashboard';
+import UsersPage from './pages/UsersPage';
+import Roles from './pages/Roles';
+import Projects from './pages/Projects';
+import ProjectDetail from './pages/ProjectDetail';
+import { apiUrl, looksLikeHtml, isRenderWakingPage, readJsonOrText } from './services/api';
 import { Layout } from './components/Layout';
 
 type RuntimeErrorState = {
@@ -38,58 +38,26 @@ class ErrorBoundary extends Component<
   }
 }
 
-const API_BASE = (() => {
-  const normalize = (value: unknown) => {
-    if (typeof value !== 'string') return '';
-    return value.trim().replace(/\/+$/, '');
-  };
-
-  try {
-    const fromEnv = normalize((import.meta as any)?.env?.VITE_API_BASE_URL);
-    if (fromEnv) return fromEnv;
-  } catch {}
-
-  try {
-    const fromStorage = normalize(window.localStorage.getItem('qapulse_api_base'));
-    if (fromStorage) return fromStorage;
-  } catch {}
-
-  try {
-    const host = window.location.hostname;
-    if (host === 'qapulse.onrender.com') return 'https://qapulsebend.onrender.com';
-  } catch {}
-
-  return '';
-})();
-
-const apiUrl = (path: string) => {
-  if (!API_BASE) return path;
-  if (path.startsWith('/')) return `${API_BASE}${path}`;
-  return `${API_BASE}/${path}`;
-};
-
-const looksLikeHtml = (text: string) => {
-  return /<!doctype|<html[\s>]/i.test(text);
-};
-
-const isRenderWakingPage = (text: string) => {
-  return /service waking up|incoming http request detected|steady hands|application loading|render - application loading/i.test(text);
-};
-
-const readJsonOrText = async (res: Response) => {
-  const contentType = res.headers.get('content-type') || '';
-  if (contentType.includes('application/json')) {
-    const data = await res.json().catch(() => null);
-    return { kind: 'json' as const, data, contentType };
-  }
-  const text = await res.text().catch(() => '');
-  return { kind: 'text' as const, text, contentType };
-};
+const toSessionUser = (raw: any): User => ({
+  id: raw.id,
+  name: raw.name,
+  email: raw.email,
+  projects: Array.isArray(raw.projects) ? raw.projects : [],
+  role: normalizeRole(raw.role),
+  permissions: typeof raw.permissions === 'object' && raw.permissions ? raw.permissions : undefined,
+  status: raw.status,
+  role_id: raw.role_id ?? null,
+  role_name: raw.role_name ?? null,
+  last_login_at: raw.last_login_at ?? null,
+  suspended_at: raw.suspended_at ?? null,
+  archived_at: raw.archived_at ?? null,
+  created_by: raw.created_by ?? null,
+  createdAt: raw.createdAt,
+  updatedAt: raw.updatedAt,
+});
 
 const App: React.FC = () => {
-  const [users, setUsers] = useState<User[]>(MOCK_USERS);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [reports, setReports] = useState<WeeklyReport[]>(MOCK_REPORTS);
   const [projects] = useState<Project[]>(MOCK_PROJECTS);
   const [runtimeError, setRuntimeError] = useState<RuntimeErrorState | null>(null);
   
@@ -201,29 +169,6 @@ const App: React.FC = () => {
     return () => window.clearTimeout(id);
   }, [currentUser?.id]);
 
-  useEffect(() => {
-    if (!currentUser) return;
-    const token = getAuthToken();
-    if (!token) return;
-
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(apiUrl('/api/reports'), {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) return;
-        if (!cancelled && Array.isArray(data.reports)) {
-          setReports(data.reports);
-        }
-      } catch {}
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [currentUser?.id]);
 
   const parseHashRoute = () => {
     const raw = window.location.hash || '';
@@ -259,7 +204,7 @@ const App: React.FC = () => {
     const userB64 = params.get('user');
     if (!token || !userB64) return;
     try {
-      const user = fromBase64Url(userB64);
+      const user = toSessionUser(fromBase64Url(userB64));
       setCurrentUser(user);
       localStorage.setItem('qapulse_auth', JSON.stringify({ token, user, expiresAt: Date.now() + 24 * 60 * 60 * 1000 }));
       window.location.hash = '#/';
@@ -311,19 +256,12 @@ const App: React.FC = () => {
           parsed.kind === 'text' && isRenderWakingPage(parsed.text)
             ? 'Backend is waking up on Render. Try again in 20–30 seconds.'
             : parsed.kind === 'text' && looksLikeHtml(parsed.text)
-              ? `API returned HTML (not JSON). Set VITE_API_BASE_URL to your backend URL. Current: ${API_BASE || '(not set)'}`
-              : `Unexpected API response. Check VITE_API_BASE_URL. Current: ${API_BASE || '(not set)'}`;
+              ? 'API returned HTML (not JSON). Ensure VITE_API_BASE_URL points to your backend.'
+              : 'Unexpected API response. Check VITE_API_BASE_URL configuration.';
         setError(msg);
         return;
       }
-      const user: User = {
-        id: data.user.id,
-        name: data.user.name,
-        email: data.user.email,
-        projects: Array.isArray(data.user.projects) ? data.user.projects : [],
-        role: normalizeRole(data.user.role),
-        permissions: typeof data.user.permissions === 'object' && data.user.permissions ? data.user.permissions : undefined,
-      };
+      const user = toSessionUser(data.user);
       setCurrentUser(user);
       localStorage.setItem(
         'qapulse_auth',
@@ -339,41 +277,6 @@ const App: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const handleAddReport = (newReport: WeeklyReport) => {
-    setReports(prev => [newReport, ...prev.filter(r => r.id !== newReport.id)]);
-
-    const token = getAuthToken();
-    if (!token) return;
-    (async () => {
-      try {
-        const res = await fetch(apiUrl('/api/reports'), {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify(newReport),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok || !data?.report) {
-          const listRes = await fetch(apiUrl('/api/reports'), {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          const listData = await listRes.json().catch(() => ({}));
-          if (listRes.ok && Array.isArray(listData.reports)) {
-            setReports(listData.reports);
-          }
-          return;
-        }
-        setReports(prev => [data.report, ...prev.filter(r => r.id !== data.report.id)]);
-      } catch {}
-    })();
-  };
-
-  const handleDeleteReport = (id: string) => {
-    setReports(prev => prev.filter(r => r.id !== id));
   };
 
   const handleForgotPassword = async () => {
@@ -620,7 +523,7 @@ const App: React.FC = () => {
                     autoComplete="current-password"
                     onKeyDown={(e) => setCapsLockOn(e.getModifierState && e.getModifierState('CapsLock'))}
                     onKeyUp={(e) => setCapsLockOn(e.getModifierState && e.getModifierState('CapsLock'))}
-                    onFocus={(e) => setCapsLockOn(e.getModifierState && e.getModifierState('CapsLock'))}
+                    onFocus={() => setCapsLockOn(false)}
                   />
                   <button
                     type="button"
@@ -782,12 +685,8 @@ const App: React.FC = () => {
             const token = getAuthToken() || '';
             const home =
               hasPermission(currentUser, 'dashboard', 'view') ? '/' :
-              hasPermission(currentUser, 'weeklyReports', 'view') ? '/weekly-reports' :
-              hasPermission(currentUser, 'docs', 'view') ? '/docs' :
               hasPermission(currentUser, 'userManagement', 'view') ? '/users' :
               '/';
-            const visibleProjects = projects.filter(p => currentUser.projects.includes(p.id));
-
             const deny = (title: string) => (
               <div className="bg-white border border-slate-200 rounded-[20px] shadow-sm p-8">
                 <div className="text-[16px] font-bold text-slate-900">Access denied</div>
@@ -797,13 +696,11 @@ const App: React.FC = () => {
 
             return (
           <Routes>
-            <Route path="/" element={hasPermission(currentUser, 'dashboard', 'view') ? <DashboardView reports={reports} projects={visibleProjects} user={currentUser} users={users} /> : <Navigate to={home} />} />
-            <Route path="/weekly-reports" element={hasPermission(currentUser, 'weeklyReports', 'view') ? <WeeklyReportView reports={reports} projects={visibleProjects} user={currentUser} users={users} onUpdate={handleAddReport} onDelete={handleDeleteReport} /> : deny('You do not have permission to view Weekly Reports.')} />
-            <Route path="/create" element={hasPermission(currentUser, 'weeklyReports', 'edit') ? <EditorView onSave={handleAddReport} user={currentUser} projects={visibleProjects} users={users} /> : deny('You do not have permission to create or edit reports.')} />
-            <Route path="/edit/:id" element={hasPermission(currentUser, 'weeklyReports', 'edit') ? <EditorView onSave={handleAddReport} user={currentUser} projects={visibleProjects} users={users} reports={reports} /> : deny('You do not have permission to create or edit reports.')} />
-            <Route path="/report/:id" element={hasPermission(currentUser, 'weeklyReports', 'view') ? <DetailView reports={reports} projects={visibleProjects} user={currentUser} users={users} onUpdate={handleAddReport} onDelete={handleDeleteReport} /> : deny('You do not have permission to view reports.')} />
-            <Route path="/docs" element={hasPermission(currentUser, 'docs', 'view') ? <DocumentationView /> : deny('You do not have permission to view FAQ.')} />
-            <Route path="/users" element={token && hasPermission(currentUser, 'userManagement', 'view') ? <UserManagementView user={currentUser} projects={projects} token={token} apiUrl={apiUrl} onSelfUpdated={(u) => setSessionUser(u)} /> : deny('You do not have permission to manage users.')} />
+            <Route path="/" element={hasPermission(currentUser, 'dashboard', 'view') ? <Dashboard user={currentUser} /> : <Navigate to={home} />} />
+            <Route path="/projects" element={token && hasPermission(currentUser, 'projectManagement', 'view') ? <Projects user={currentUser} token={token} onUnauthorized={() => setSessionUser(null)} /> : deny('You do not have permission to view projects.')} />
+            <Route path="/projects/:id" element={token && hasPermission(currentUser, 'projectManagement', 'view') ? <ProjectDetail user={currentUser} token={token} onUnauthorized={() => setSessionUser(null)} /> : deny('You do not have permission to view projects.')} />
+            <Route path="/users" element={token && hasPermission(currentUser, 'userManagement', 'view') ? <UsersPage user={currentUser} projects={projects} token={token} onSelfUpdated={(u) => setSessionUser(u)} onUnauthorized={() => setSessionUser(null)} /> : deny('You do not have permission to manage users.')} />
+            <Route path="/roles" element={token && hasPermission(currentUser, 'roleManagement', 'view') ? <Roles user={currentUser} token={token} onUnauthorized={() => setSessionUser(null)} /> : deny('You do not have permission to manage roles.')} />
             <Route path="*" element={<Navigate to={home} />} />
           </Routes>
             );
